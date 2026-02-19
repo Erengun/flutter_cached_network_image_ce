@@ -8,12 +8,12 @@ environment:
   flutter: '>=3.10.0'
 
 dependencies:
-  baseflow_plugin_template: ^2.2.0
-  cached_network_image:
+  cached_network_image_ce:
     path: ../
   flutter:
     sdk: flutter
   flutter_blurhash: ^0.8.2
+  flutter_cache_manager: ^3.4.1
 
 dev_dependencies:
   flutter_test:

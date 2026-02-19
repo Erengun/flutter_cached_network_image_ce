@@ -1,34 +1,67 @@
 import 'dart:io';
 
-import 'package:baseflow_plugin_template/baseflow_plugin_template.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
 
+import 'benchmark_page.dart';
+
 void main() {
   CachedNetworkImage.logLevel = CacheManagerLogLevel.debug;
+  runApp(const ExampleApp());
+}
 
-  runApp(
-    BaseflowPluginExample(
-      pluginName: 'CachedNetworkImage',
-      githubURL: 'https://github.com/Baseflow/flutter_cached_network_image',
-      pubDevURL: 'https://pub.dev/packages/cached_network_image',
-      pages: [
-        BasicContent.createPage(),
-        ListContent.createPage(),
-        GridContent.createPage(),
-      ],
-    ),
-  );
+class ExampleApp extends StatelessWidget {
+  const ExampleApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'CachedNetworkImage CE Demo',
+      theme: ThemeData(
+        colorSchemeSeed: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 4,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('CachedNetworkImage CE'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(icon: Icon(Icons.image), text: 'Basic'),
+              Tab(icon: Icon(Icons.list), text: 'List'),
+              Tab(icon: Icon(Icons.grid_on), text: 'Grid'),
+              Tab(icon: Icon(Icons.speed), text: 'Benchmark'),
+            ],
+          ),
+        ),
+        body: const TabBarView(
+          children: [
+            BasicContent(),
+            ListContent(),
+            GridContent(),
+            BenchmarkContent(),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Demonstrates a [StatelessWidget] containing [CachedNetworkImage]
 class BasicContent extends StatelessWidget {
   const BasicContent({super.key});
-
-  static ExamplePage createPage() {
-    return ExamplePage(Icons.image, (context) => const BasicContent());
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -161,10 +194,6 @@ class BasicContent extends StatelessWidget {
 class ListContent extends StatelessWidget {
   const ListContent({super.key});
 
-  static ExamplePage createPage() {
-    return ExamplePage(Icons.list, (context) => const ListContent());
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
@@ -190,10 +219,6 @@ class ListContent extends StatelessWidget {
 /// Demonstrates a [GridView] containing [CachedNetworkImage]
 class GridContent extends StatelessWidget {
   const GridContent({super.key});
-
-  static ExamplePage createPage() {
-    return ExamplePage(Icons.grid_on, (context) => const GridContent());
-  }
 
   @override
   Widget build(BuildContext context) {

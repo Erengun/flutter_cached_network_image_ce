@@ -5,7 +5,12 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+
+import 'src/cache_manager.dart';
+
+export 'src/cache_manager.dart';
+export 'src/file_response.dart';
+export 'src/http_exception.dart';
 
 /// Listener for errors
 typedef ErrorListener = void Function(Object);

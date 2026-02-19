@@ -5,8 +5,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:file/memory.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:mocktail/mocktail.dart';
 
 class FakeCacheManager extends Mock implements CacheManager {

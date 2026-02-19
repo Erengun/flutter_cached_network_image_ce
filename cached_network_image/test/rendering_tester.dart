@@ -266,6 +266,9 @@ class FakeTicker implements Ticker {
   bool muted = false;
 
   @override
+  bool forceFrames = false;
+
+  @override
   void absorbTicker(Ticker originalTicker) {}
 
   @override

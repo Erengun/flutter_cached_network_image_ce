@@ -9,8 +9,8 @@ import 'dart:ui_web';
 import 'package:cached_network_image_platform_interface'
         '/cached_network_image_platform_interface.dart' as platform
     show ImageLoader, ImageRenderMethodForWeb;
+import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 enum _State { open, waitingForData, closing }
 

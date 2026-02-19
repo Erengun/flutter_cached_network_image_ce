@@ -1,7 +1,6 @@
 // ignore_for_file: deprecated_member_use_from_same_package
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image_platform_interface'
@@ -9,7 +8,6 @@ import 'package:cached_network_image_platform_interface'
 import 'package:cached_network_image_web/cached_network_image_web.dart';
 import 'package:file/file.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -45,26 +43,7 @@ class MockCacheManager implements BaseCacheManager {
   }
 
   @override
-  Future<FileInfo> downloadFile(
-    String url, {
-    String? key,
-    Map<String, String>? authHeaders,
-    bool force = false,
-  }) {
-    throw UnimplementedError();
-  }
-
-  @override
   Future<void> emptyCache() {
-    throw UnimplementedError();
-  }
-
-  @override
-  Stream<FileInfo> getFile(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-  }) {
     throw UnimplementedError();
   }
 
@@ -73,11 +52,6 @@ class MockCacheManager implements BaseCacheManager {
     String key, {
     bool ignoreMemCache = false,
   }) {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<FileInfo?> getFileFromMemory(String key) {
     throw UnimplementedError();
   }
 
@@ -92,30 +66,9 @@ class MockCacheManager implements BaseCacheManager {
   }
 
   @override
-  Future<File> getSingleFile(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-  }) {
-    throw UnimplementedError();
-  }
-
-  @override
   Future<File> putFile(
     String url,
-    Uint8List fileBytes, {
-    String? key,
-    String? eTag,
-    Duration maxAge = const Duration(days: 30),
-    String fileExtension = 'file',
-  }) {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<File> putFileStream(
-    String url,
-    Stream<List<int>> source, {
+    List<int> fileBytes, {
     String? key,
     String? eTag,
     Duration maxAge = const Duration(days: 30),

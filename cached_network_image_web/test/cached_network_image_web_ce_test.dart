@@ -27,11 +27,37 @@ void main() {
     );
     expect(stream, isNotNull);
   });
+
+  test('loadBufferAsync returns a stream', () {
+    final imageLoader = ImageLoader();
+    final stream = imageLoader.loadBufferAsync(
+      'test.com/image',
+      null,
+      StreamController<ImageChunkEvent>(),
+      bufferDecoder,
+      MockCacheManager(),
+      null,
+      null,
+      null,
+      ImageRenderMethodForWeb.HttpGet,
+      () => {},
+    );
+    expect(stream, isNotNull);
+  });
 }
 
 Future<ui.Codec> decoder(
   ui.ImmutableBuffer buffer, {
   ui.TargetImageSizeCallback? getTargetSize,
+}) {
+  throw UnimplementedError();
+}
+
+Future<ui.Codec> bufferDecoder(
+  ui.ImmutableBuffer buffer, {
+  bool allowUpscaling = false,
+  int? cacheHeight,
+  int? cacheWidth,
 }) {
   throw UnimplementedError();
 }

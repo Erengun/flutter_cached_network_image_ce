@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:file/file.dart';
 
 import 'file_response.dart';
@@ -16,8 +18,7 @@ class CacheLogger {
   /// Log a message at a certain log level.
   void log(String message, CacheManagerLogLevel level) {
     if (CacheManager.logLevel.index >= level.index) {
-      // ignore: avoid_print
-      print(message);
+      developer.log(message);
     }
   }
 }

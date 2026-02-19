@@ -1,3 +1,13 @@
+## [4.1.0] - 2026-02-19
+
+* **Feature:** Added `httpClientFactory` parameter to `DefaultCacheManager` for HTTP client dependency injection, enabling easy mocking in tests
+* **Refactor:** Replaced raw `Map<String, dynamic>` with typed `CacheEntryMetadata` class for all cache metadata operations
+* **Tests:** Comprehensive test coverage (131 tests, 86% coverage)
+  * `DefaultCacheManager`: HTTP download success/errors, progress reporting, header forwarding, cache hit/miss/stale behavior, cleanup logic (31 tests)
+  * Leak tests: StreamController closure, `http.Client` cleanup, file sink closure, `ImageLoader` chunkEvents, `MultiImageStreamCompleter` disposal, Hive box lifecycle (19 tests)
+  * `ImageLoader`, `CachedNetworkImageProvider`, `CacheEntryMetadata` coverage
+* **Fix:** Resolved analyzer warnings across all packages
+
 ## [4.0.1] - 2026-02-19
 
 * Added `repository` field for pub.dev source code display

@@ -74,16 +74,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ///
   /// [stalePeriod] is how long a file remains valid in the cache.
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
+  /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
-  });
+    http.Client Function()? httpClientFactory,
+  }) : _httpClientFactory = httpClientFactory ?? http.Client.new;
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
 
   /// Maximum number of objects in the cache before cleanup.
   final int maxNrOfCacheObjects;
+
+  /// Factory for creating HTTP clients (injectable for testing).
+  final http.Client Function() _httpClientFactory;
 
   Box<Map>? _cacheBox;
   String? _cacheDir;
@@ -214,7 +219,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       request.headers.addAll(headers);
     }
 
-    final client = http.Client();
+    final client = _httpClientFactory();
     try {
       final response = await client.send(request);
 

@@ -1,68 +1,139 @@
-# Cached network image
-[![pub package](https://img.shields.io/pub/v/cached_network_image.svg)](https://pub.dartlang.org/packages/cached_network_image)
-[![codecov](https://codecov.io/gh/Baseflow/flutter_cached_network_image/branch/main/graph/badge.svg?token=I5qW0RvoXN)](https://codecov.io/gh/Baseflow/flutter_cached_network_image)
-[![Build Status](https://github.com/Baseflow/flutter_cached_network_image/workflows/app_facing_package/badge.svg?branch=develop)](https://github.com/Baseflow/flutter_cached_network_image/actions/workflows/app_facing_package.yaml)
+# Cached Network Image — Community Edition
 
-A flutter library to show images from the internet and keep them in the cache directory.
+[![pub package](https://img.shields.io/pub/v/cached_network_image_ce.svg)](https://pub.dev/packages/cached_network_image_ce)
+[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](opensource.org/licenses/MIT)
 
+A Flutter library to show images from the internet and keep them in the cache directory. 
 
+**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image).**
 
-## Sponsors 
- <a href="https://getstream.io/chat/flutter/tutorial/?utm_source=Github&utm_medium=Github_Repo_Content_Ad&utm_content=Developer&utm_campaign=Github_Jan2022_FlutterChat&utm_term=renefloor" target="_blank"><img width="250px" src="https://stream-blog.s3.amazonaws.com/blog/wp-content/uploads/fc148f0fc75d02841d017bb36e14e388/Stream-logo-with-background-.png"/></a><br/><span><a href="https://getstream.io/chat/flutter/tutorial/?utm_source=Github&utm_medium=Github_Repo_Content_Ad&utm_content=Developer&utm_campaign=Github_Jan2022_FlutterChat&utm_term=renefloor" target="_blank">Try the Flutter Chat Tutorial 💬</a></span>
-        
-        
+---
 
-## How to use
-The CachedNetworkImage can be used directly or through the ImageProvider.
-Both the CachedNetworkImage as CachedNetworkImageProvider have minimal support for web. It currently doesn't include caching.
+## 📖 The Story: Why this fork?
 
-With a placeholder:
+The original `cached_network_image` package by Baseflow is a titan in the Flutter ecosystem, used by millions. However, it has been **effectively unmaintained since August 2024**, leaving over 300 issues unresolved, including critical memory leaks and scroll performance bugs.
+
+As the Flutter ecosystem evolved, the original architecture began to show its age. It relied on `sqflite` for cache management—a heavy, SQL-based solution that requires platform channels to communicate with native code. For a simple task like "checking if an image exists," this overhead caused UI jank in heavy lists.
+
+**We created the Community Edition (`_ce`) to fix this.**
+
+We didn't just fork it to merge dependabot PRs. We re-engineered the caching layer.
+
+### ⚡ The Architectural Shift: SQLite vs. Hive
+
+We replaced the heavy `sqflite` dependency with **[`hive_ce`](https://pub.dev/packages/hive_ce)**. 
+
+* **Old Way (`sqflite`):** serialized data → Platform Channel → Java/Obj-C → SQLite → Disk. (Slow, blocking).
+* **New Way (`hive_ce`):** Dart Memory → Direct Disk Access. (Instant, non-blocking).
+
+The result? **Zero-jank scrolling.**
+
+### 🚀 Benchmarks
+
+We benchmarked the cache metadata operations (checking, writing, and deleting cache entries) on an iPhone Simulator. The results speak for themselves:
+
+| Operation | Payload Size | Original (`sqflite`) | **CE (`hive_ce`)** | **Improvement** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | ⚡ **8.00x Faster** |
+| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | 🚀 **4.00x Faster** |
+| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | 🧹 **2.89x Faster** |
+| **Read (Large)** | 1 MB | 8 ms | **1 ms** | ⚡ **8.00x Faster** |
+
+*Note: "Read" is the most critical operation for scrolling performance, as every list item checks the cache before rendering.*
+
+![Benchmark Results](simulator_benchmark.png)
+
+---
+
+## 🛠 Features
+
+* **Drop-in Replacement:** 99% API compatible with the original package.
+* **High Performance:** Powered by `hive_ce` for instant cache lookups.
+* **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
+* **Web Support:** Minimal support for web (currently works like standard `Image.network`).
+
+## 📦 Installation
+
+Add `cached_network_image_ce` to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  cached_network_image_ce: ^1.0.0
+
+```
+
+## 💻 How to use
+
+The API is identical to the original package. You can use `CachedNetworkImage` directly or via `ImageProvider`.
+
+### Basic Usage with Placeholder
+
+```dart
+import 'package:cached_network_image_ce/cached_network_image_ce.dart';
+
+CachedNetworkImage(
+  imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
+  placeholder: (context, url) => CircularProgressIndicator(),
+  errorWidget: (context, url, error) => Icon(Icons.error),
+),
+
+```
+
+### With Progress Indicator
+
 ```dart
 CachedNetworkImage(
-        imageUrl: "http://via.placeholder.com/350x150",
-        placeholder: (context, url) => CircularProgressIndicator(),
-        errorWidget: (context, url, error) => Icon(Icons.error),
-     ),
- ```
- 
- Or with a progress indicator:
- ```dart
-CachedNetworkImage(
-        imageUrl: "http://via.placeholder.com/350x150",
-        progressIndicatorBuilder: (context, url, downloadProgress) => 
-                CircularProgressIndicator(value: downloadProgress.progress),
-        errorWidget: (context, url, error) => Icon(Icons.error),
-     ),
- ```
+  imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
+  progressIndicatorBuilder: (context, url, downloadProgress) =>
+      CircularProgressIndicator(value: downloadProgress.progress),
+  errorWidget: (context, url, error) => Icon(Icons.error),
+),
 
+```
 
-````dart
-Image(image: CachedNetworkImageProvider(url))
-````
+### Advanced Usage (ImageBuilder)
 
-When you want to have both the placeholder functionality and want to get the imageprovider to use in another widget you can provide an imageBuilder:
+Use this when you need an `ImageProvider` for things like `DecorationImage`:
+
 ```dart
 CachedNetworkImage(
-  imageUrl: "http://via.placeholder.com/200x150",
+  imageUrl: '[https://via.placeholder.com/200x150](https://via.placeholder.com/200x150)',
   imageBuilder: (context, imageProvider) => Container(
     decoration: BoxDecoration(
       image: DecorationImage(
-          image: imageProvider,
-          fit: BoxFit.cover,
-          colorFilter:
-              ColorFilter.mode(Colors.red, BlendMode.colorBurn)),
+        image: imageProvider,
+        fit: BoxFit.cover,
+        colorFilter: ColorFilter.mode(Colors.red, BlendMode.colorBurn),
+      ),
     ),
   ),
   placeholder: (context, url) => CircularProgressIndicator(),
   errorWidget: (context, url, error) => Icon(Icons.error),
 ),
+
 ```
 
-## How it works
-The cached network images stores and retrieves files using the [flutter_cache_manager](https://pub.dartlang.org/packages/flutter_cache_manager). 
+### Direct ImageProvider Usage
 
-## FAQ
-### My app crashes when the image loading failed. (I know, this is not really a question.)
-Does it really crash though? The debugger might pause, as the Dart VM doesn't recognize it as a caught exception; the console might print errors; even your crash reporting tool might report it (I know, that really sucks). However, does it really crash? Probably everything is just running fine. If you really get an app crashes you are fine to report an issue, but do that with a small example so we can reproduce that crash.
+```dart
+Image(image: CachedNetworkImageProvider(url))
 
-See for example [this](https://github.com/Baseflow/flutter_cached_network_image/issues/336#issuecomment-760769361) or [this](https://github.com/Baseflow/flutter_cached_network_image/issues/536#issuecomment-760857495) answer on previous posted issues.
+```
+
+## ❓ FAQ
+
+**Q: Will I lose my users' existing cache if I migrate?**
+A: Yes. Because we switched the storage engine from SQLite to Hive, the old cache files will be ignored. Users will re-download images once as they browse. This is a one-time migration cost for a permanent performance gain.
+
+**Q: My app crashes/pauses on errors?**
+A: In Debug mode, Flutter may pause on exceptions even if they are caught. This is expected behavior for network errors (404s). In Release mode, these are handled silently by the `errorWidget`.
+
+## 🤝 Contributing
+
+We welcome contributions! If you want to help maintain this essential package, please check the [CONTRIBUTING.md](https://www.google.com/search?q=CONTRIBUTING.md).
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+```

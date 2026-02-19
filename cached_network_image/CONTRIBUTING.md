@@ -1,4 +1,4 @@
-Contributing to CachedNetworkImage
+Contributing to CachedNetworkImage (Community Edition)
 =============================================
 
 What you will need
@@ -12,18 +12,18 @@ What you will need
 Setting up your development environment
 ---------------------------------------
 
- * Fork `https://github.com/baseflow/flutter_cached_network_image` into your own GitHub account. If you already have a fork and moving to a new computer, make sure you update you fork.
+ * Fork `https://github.com/Erengun/flutter_cached_network_image_ce` into your own GitHub account. If you already have a fork and moving to a new computer, make sure you update you fork.
  * If you haven't configured your machine with an SSH key that's known to github, then
    follow [GitHub's directions](https://help.github.com/articles/generating-ssh-keys/)
    to generate an SSH key.
- * Clone your forked repo on your local development machine: `git clone git@github.com:<your_name_here>/flutter_cached_network_image.git`
- * Change into the `flutter_cached_network_image` directory: `cd flutter_cached_network_image`
- * Add an upstream to the original repo, so that fetch from the main repository and not your clone: `git remote add upstream git@github.com:baseflow/flutter_cached_network_image.git`
+ * Clone your forked repo on your local development machine: `git clone git@github.com:<your_name_here>/flutter_cached_network_image_ce.git`
+ * Change into the `flutter_cached_network_image_ce` directory: `cd flutter_cached_network_image_ce`
+ * Add an upstream to the original repo, so that fetch from the main repository and not your clone: `git remote add upstream git@github.com:Erengun/flutter_cached_network_image_ce.git`
 
 Running the example project
 ---------------------------
 
- * Change into the example directory: `cd example`
+ * Change into the example directory: `cd cached_network_image/example`
  * Run the App: `flutter run`
 
 Contribute
@@ -33,10 +33,10 @@ We really appreciate contributions via GitHub pull requests. To contribute take 
 
  * Make sure you are up to date with the latest code on the main:
    * `git fetch upstream`
-   * `git checkout upstream/develop -b <name_of_your_branch>`
+   * `git checkout upstream/main -b <name_of_your_branch>`
  * Apply your changes
  * Verify your changes and fix potential warnings/ errors:
-   * Check formatting: `flutter format .`
+   * Check formatting: `dart format .`
    * Run static analyses: `flutter analyze`
    * Run unit-tests: `flutter test`
  * Commit your changes: `git commit -am "<your informative commit message>"`
@@ -44,6 +44,6 @@ We really appreciate contributions via GitHub pull requests. To contribute take 
 
 Send us your pull request:
 
- * Go to `https://github.com/baseflow/flutter_cached_network_image` and click the "Compare & pull request" button.
+ * Go to `https://github.com/Erengun/flutter_cached_network_image_ce` and click the "Compare & pull request" button.
 
  Please make sure you solved all warnings and errors reported by the static code analyses and that you fill in the full pull request template. Failing to do so will result in us asking you to fix it.

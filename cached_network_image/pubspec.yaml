@@ -2,7 +2,6 @@ name: cached_network_image_ce
 description: Community Edition Flutter library to load and cache network images.
   Can also be used with placeholder and error widgets.
 homepage: https://github.com/Erengun/flutter_cached_network_image_ce
-publish_to: none
 topics:
   - cache
   - image
@@ -14,10 +13,8 @@ environment:
   flutter: '>=3.10.0'
 
 dependencies:
-  cached_network_image_platform_interface:
-    path: ../cached_network_image_platform_interface
-  cached_network_image_web:
-    path: ../cached_network_image_web
+  cached_network_image_platform_interface_ce: ^5.0.0
+  cached_network_image_web_ce: ^2.0.0
   file: '>=7.0.0 <8.0.0'
   flutter:
     sdk: flutter

@@ -1,5 +1,5 @@
 /// Platform interface for CachedNetworkImage
-library cached_network_image_platform_interface;
+library cached_network_image_platform_interface_ce;
 
 import 'dart:async';
 import 'dart:ui' as ui;

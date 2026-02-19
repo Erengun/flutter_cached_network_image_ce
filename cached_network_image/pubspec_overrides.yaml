@@ -1,0 +1,5 @@
+dependency_overrides:
+  cached_network_image_platform_interface_ce:
+    path: ../cached_network_image_platform_interface
+  cached_network_image_web_ce:
+    path: ../cached_network_image_web

@@ -2,7 +2,7 @@
 /// Can also be used with placeholder and error widgets.
 library cached_network_image;
 
-export 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart'
+export 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart'
     show
         BaseCacheManager,
         CacheManager,

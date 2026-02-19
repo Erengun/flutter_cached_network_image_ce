@@ -1,7 +1,11 @@
-name: cached_network_image_platform_interface
-description: Platform interface for CachedNetworkImage
+name: cached_network_image_platform_interface_ce
+description: Platform interface for CachedNetworkImage (Community Edition)
 version: 5.0.0
 homepage: https://github.com/Erengun/flutter_cached_network_image_ce
+topics:
+  - cache
+  - image
+  - network-image
 
 environment:
   sdk: ^3.0.0

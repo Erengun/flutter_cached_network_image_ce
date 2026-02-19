@@ -1,15 +1,18 @@
-name: cached_network_image_web
-description: Web implementation of CachedNetworkImage
+name: cached_network_image_web_ce
+description: Web implementation of CachedNetworkImage (Community Edition)
 version: 2.0.0
 homepage: https://github.com/Erengun/flutter_cached_network_image_ce
+topics:
+  - cache
+  - image
+  - network-image
 
 environment:
   sdk: ^3.0.0
   flutter: '>=3.10.0'
 
 dependencies:
-  cached_network_image_platform_interface:
-    path: ../cached_network_image_platform_interface
+  cached_network_image_platform_interface_ce: ^5.0.0
   flutter:
     sdk: flutter
   web: ^1.0.0

@@ -3,10 +3,10 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:ui';
 
-import 'package:cached_network_image_platform_interface'
-        '/cached_network_image_platform_interface.dart' as platform
+import 'package:cached_network_image_platform_interface_ce'
+        '/cached_network_image_platform_interface_ce.dart' as platform
     show ImageLoader;
-import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart';
+import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:flutter/material.dart';
 
 

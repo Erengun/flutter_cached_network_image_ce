@@ -1,15 +1,15 @@
 /// Web implementation of CachedNetworkImage
-library cached_network_image_web;
+library cached_network_image_web_ce;
 
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:ui_web';
 
-import 'package:cached_network_image_platform_interface'
-        '/cached_network_image_platform_interface.dart' as platform
+import 'package:cached_network_image_platform_interface_ce'
+        '/cached_network_image_platform_interface_ce.dart' as platform
     show ImageLoader, ImageRenderMethodForWeb;
-import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart';
+import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:flutter/material.dart';
 
 enum _State { open, waitingForData, closing }

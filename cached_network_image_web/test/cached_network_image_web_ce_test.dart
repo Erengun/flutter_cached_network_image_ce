@@ -3,9 +3,9 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:cached_network_image_platform_interface'
-    '/cached_network_image_platform_interface.dart' hide ImageLoader;
-import 'package:cached_network_image_web/cached_network_image_web.dart';
+import 'package:cached_network_image_platform_interface_ce'
+    '/cached_network_image_platform_interface_ce.dart' hide ImageLoader;
+import 'package:cached_network_image_web_ce/cached_network_image_web_ce.dart';
 import 'package:file/file.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';

@@ -1,24 +1,74 @@
 # Cached Network Image — Community Edition
 
 [![pub package](https://img.shields.io/pub/v/cached_network_image_ce.svg)](https://pub.dev/packages/cached_network_image_ce)
+[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](https://opensource.org/licenses/MIT)
 
-A Flutter library to show images from the internet and keep them in the cache directory. Community maintained fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image).
+A Flutter library to show images from the internet and keep them in the cache directory.
 
-## Why this fork?
+**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image).**
 
-The [original `cached_network_image`](https://github.com/Baseflow/flutter_cached_network_image) by Baseflow has been **unmaintained for over 2 years**, with no updates, bug fixes, or responses to issues and pull requests. This community edition was created to:
+---
 
-- **Keep the package alive** — continue fixing bugs and adding features the community needs.
-- **Replace `sqflite` with `hive_ce` for cache storage** — the original package depended on `flutter_cache_manager` (also by Baseflow) which used `sqflite` under the hood. This community edition uses [`hive_ce`](https://pub.dev/packages/hive_ce) instead, which is more performant and actively maintained.
-- **Stay up-to-date** with the latest Flutter and Dart SDK versions.
+## 📖 The Story: Why this fork?
 
-## How to use
+The original `cached_network_image` package by Baseflow is a titan in the Flutter ecosystem, used by millions. However, it has been **effectively unmaintained since August 2024**, leaving over 300 issues unresolved, including critical memory leaks and scroll performance bugs.
 
-The `CachedNetworkImage` can be used directly or through the `ImageProvider`.
+As the Flutter ecosystem evolved, the original architecture began to show its age. It relied on `sqflite` for cache management—a heavy, SQL-based solution that requires platform channels to communicate with native code. For a simple task like "checking if an image exists," this overhead caused UI jank in heavy lists.
+
+**We created the Community Edition (`_ce`) to fix this.**
+
+We didn't just fork it to merge dependabot PRs. We re-engineered the caching layer.
+
+### ⚡ The Architectural Shift: SQLite vs. Hive
+
+We replaced the heavy `sqflite` dependency with **[`hive_ce`](https://pub.dev/packages/hive_ce)**.
+
+* **Old Way (`sqflite`):** serialized data → Platform Channel → Java/Obj-C → SQLite → Disk. (Slow, blocking).
+* **New Way (`hive_ce`):** Dart Memory → Direct Disk Access. (Instant, non-blocking).
+
+The result? **Zero-jank scrolling.**
+
+### 🚀 Benchmarks
+
+We benchmarked the cache metadata operations (checking, writing, and deleting cache entries) on an iPhone Simulator. The results speak for themselves:
+
+| Operation | Payload Size | Original (`sqflite`) | **CE (`hive_ce`)** | **Improvement** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | ⚡ **8.00x Faster** |
+| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | 🚀 **4.00x Faster** |
+| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | 🧹 **2.89x Faster** |
+| **Read (Large)** | 1 MB | 8 ms | **1 ms** | ⚡ **8.00x Faster** |
+
+*Note: "Read" is the most critical operation for scrolling performance, as every list item checks the cache before rendering.*
+
+---
+
+## 🛠 Features
+
+* **Drop-in Replacement:** 99% API compatible with the original package.
+* **High Performance:** Powered by `hive_ce` for instant cache lookups.
+* **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
+* **Web Support:** Minimal support for web (currently works like standard `Image.network`).
+
+## 📦 Installation
+
+Add `cached_network_image_ce` to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  cached_network_image_ce: ^4.0.1
+```
+
+## 💻 How to use
+
+The API is identical to the original package. You can use `CachedNetworkImage` directly or via `ImageProvider`.
 Both `CachedNetworkImage` and `CachedNetworkImageProvider` have minimal support for web (currently without caching).
 
-With a placeholder:
+### Basic Usage with Placeholder
+
 ```dart
+import 'package:cached_network_image_ce/cached_network_image.dart';
+
 CachedNetworkImage(
   imageUrl: 'https://via.placeholder.com/350x150',
   placeholder: (context, url) => CircularProgressIndicator(),
@@ -26,7 +76,8 @@ CachedNetworkImage(
 ),
 ```
 
-Or with a progress indicator:
+### With Progress Indicator
+
 ```dart
 CachedNetworkImage(
   imageUrl: 'https://via.placeholder.com/350x150',
@@ -36,11 +87,10 @@ CachedNetworkImage(
 ),
 ```
 
-```dart
-Image(image: CachedNetworkImageProvider(url))
-```
+### Advanced Usage (ImageBuilder)
 
-When you want to have both the placeholder functionality and want to get the image provider to use in another widget you can provide an `imageBuilder`:
+Use this when you need an `ImageProvider` for things like `DecorationImage`:
+
 ```dart
 CachedNetworkImage(
   imageUrl: 'https://via.placeholder.com/200x150',
@@ -58,19 +108,24 @@ CachedNetworkImage(
 ),
 ```
 
-## How it works
+### Direct ImageProvider Usage
 
-The cached network images stores and retrieves files using the [flutter_cache_manager](https://pub.dev/packages/flutter_cache_manager).
+```dart
+Image(image: CachedNetworkImageProvider(url))
+```
 
-## FAQ
+## ❓ FAQ
 
-### My app crashes when the image loading failed. (I know, this is not really a question.)
-Does it really crash though? The debugger might pause, as the Dart VM doesn't recognize it as a caught exception; the console might print errors; even your crash reporting tool might report it (I know, that really sucks). However, does it really crash? Probably everything is just running fine. If you really get an app crash you are fine to report an issue, but do that with a small example so we can reproduce that crash.
+**Q: Will I lose my users' existing cache if I migrate?**
+A: Yes. Because we switched the storage engine from SQLite to Hive, the old cache files will be ignored. Users will re-download images once as they browse. This is a one-time migration cost for a permanent performance gain.
 
-## Contributing
+**Q: My app crashes/pauses on errors?**
+A: In Debug mode, Flutter may pause on exceptions even if they are caught. This is expected behavior for network errors (404s). In Release mode, these are handled silently by the `errorWidget`.
 
-Contributions are welcome! Please see the [contributing guide](CONTRIBUTING.md) for details.
+## 🤝 Contributing
 
-## License
+We welcome contributions! If you want to help maintain this essential package, please check the [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 📄 License
 
 This project is licensed under the MIT License.

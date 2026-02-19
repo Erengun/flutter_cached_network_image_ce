@@ -1,3 +1,9 @@
+## [4.0.1] - 2026-02-19
+
+* Added `repository` field for pub.dev source code display
+* Updated README with benchmarks and architectural details
+* Updated dependencies to `_ce` suffixed packages
+
 ## [3.4.1] - 2024-08-13
 
 * Target js_interop for Wasm support

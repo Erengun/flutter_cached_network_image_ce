@@ -1,3 +1,9 @@
+## [2.0.1] - 2026-02-19
+
+* Renamed package to `cached_network_image_web_ce`
+* Updated dependency to `cached_network_image_platform_interface_ce`
+* Added `repository` field for pub.dev source code display
+
 ## [1.3.1] - 2024-08-13
 
 * Target js_interop for Wasm support

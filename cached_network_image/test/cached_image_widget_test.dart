@@ -115,6 +115,12 @@ void main() {
       );
       await tester.pump();
       expect(tester.takeException(), isNull);
+
+      final cachedImage = tester.widget<CachedNetworkImage>(
+        find.byType(CachedNetworkImage),
+      );
+      expect(cachedImage.width, 100);
+      expect(cachedImage.height, 200);
     });
 
     testWidgets('passes fit, alignment, repeat, matchTextDirection',
@@ -138,6 +144,14 @@ void main() {
       );
       await tester.pump();
       expect(tester.takeException(), isNull);
+
+      final cachedImage = tester.widget<CachedNetworkImage>(
+        find.byType(CachedNetworkImage),
+      );
+      expect(cachedImage.fit, BoxFit.cover);
+      expect(cachedImage.alignment, Alignment.topLeft);
+      expect(cachedImage.repeat, ImageRepeat.repeat);
+      expect(cachedImage.matchTextDirection, isTrue);
     });
 
     testWidgets('passes color and colorBlendMode', (tester) async {

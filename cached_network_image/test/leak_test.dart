@@ -50,7 +50,10 @@ void main() {
     );
     try {
       testTempDir.deleteSync(recursive: true);
-    } on Object catch (_) {}
+    } on Object catch (e) {
+      // ignore: avoid_print
+      print('Failed to clean temp dir: $e');
+    }
   });
 
   // ===========================================================================
@@ -231,9 +234,10 @@ void main() {
       expect(fileInfos, isNotEmpty);
 
       // Verify: the file should be readable (sink was flushed+closed)
-      final file = fileInfos.first.file as io.File;
-      expect(await file.exists(), isTrue);
-      final bytes = await file.readAsBytes();
+      final file = fileInfos.first.file;
+      expect(file, isA<io.File>());
+      expect(await (file as io.File).exists(), isTrue);
+      final bytes = await (file as io.File).readAsBytes();
       expect(bytes.isNotEmpty, isTrue);
 
       await manager.emptyCache();

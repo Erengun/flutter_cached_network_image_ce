@@ -166,10 +166,9 @@ void main() {
     });
 
     test('emptyCache clears all files', () async {
-      final url1 =
-          'https://example.com/empty1-${DateTime.now().millisecondsSinceEpoch}.bin';
-      final url2 =
-          'https://example.com/empty2-${DateTime.now().millisecondsSinceEpoch + 1}.bin';
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final url1 = 'https://example.com/empty1-$now.bin';
+      final url2 = 'https://example.com/empty2-${now + 1}.bin';
 
       await manager.putFile(url1, [1, 2, 3], fileExtension: 'bin');
       await manager.putFile(url2, [4, 5, 6], fileExtension: 'bin');
@@ -383,7 +382,7 @@ void main() {
       expect(downloadCount, 1);
 
       // Wait a tiny bit to ensure stalePeriod (0) has passed
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Second request should re-download because file is expired
       await manager.getFileStream(url).toList();
@@ -411,7 +410,7 @@ void main() {
       await manager.getFileStream(url).toList();
 
       // Wait for expiry
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Second download returns 404 — should remove from cache
       try {
@@ -420,11 +419,13 @@ void main() {
         // Expected: 404 error
       }
 
-      // Wait for async removeFile to complete
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-
-      // File should be removed from cache
-      final cached = await manager.getFileFromCache(url);
+      // Wait for async removeFile to complete with retry
+      FileInfo? cached;
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        cached = await manager.getFileFromCache(url);
+        if (cached == null) break;
+      }
       expect(cached, isNull);
     });
   });

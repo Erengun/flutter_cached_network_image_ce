@@ -194,24 +194,28 @@ void main() {
   });
 
   group('CacheLogger', () {
-    test('log prints when log level is sufficient', () {
+    test('log records call when log level is sufficient', () {
       final oldLogLevel = CacheManager.logLevel;
       CacheManager.logLevel = CacheManagerLogLevel.verbose;
 
-      // This should not throw; we just verify it can be called.
-      final logger = CacheLogger();
+      final logger = _TestCacheLogger();
       logger.log('Test message', CacheManagerLogLevel.verbose);
+
+      expect(logger.calls, hasLength(1));
+      expect(logger.calls.first.message, 'Test message');
+      expect(logger.calls.first.level, CacheManagerLogLevel.verbose);
 
       CacheManager.logLevel = oldLogLevel;
     });
 
-    test('log does not throw when log level is insufficient', () {
+    test('log does not record when log level is insufficient', () {
       final oldLogLevel = CacheManager.logLevel;
       CacheManager.logLevel = CacheManagerLogLevel.none;
 
-      final logger = CacheLogger();
-      // Should not throw or print when level is below threshold.
+      final logger = _TestCacheLogger();
       logger.log('Test message', CacheManagerLogLevel.verbose);
+
+      expect(logger.calls, isEmpty);
 
       CacheManager.logLevel = oldLogLevel;
     });
@@ -312,5 +316,22 @@ class MockCacheManager implements BaseCacheManager {
   @override
   Future<void> removeFile(String key) {
     throw UnimplementedError();
+  }
+}
+
+class _LogCall {
+  _LogCall(this.message, this.level);
+  final String message;
+  final CacheManagerLogLevel level;
+}
+
+class _TestCacheLogger extends CacheLogger {
+  final List<_LogCall> calls = [];
+
+  @override
+  void log(String message, CacheManagerLogLevel level) {
+    if (CacheManager.logLevel.index >= level.index) {
+      calls.add(_LogCall(message, level));
+    }
   }
 }

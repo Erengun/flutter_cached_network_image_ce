@@ -88,9 +88,7 @@ void main() {
 
       Object? error;
       try {
-        await manager
-            .getFileStream('https://example.com/error.png')
-            .toList();
+        await manager.getFileStream('https://example.com/error.png').toList();
       } on Object catch (e) {
         error = e;
       }
@@ -194,7 +192,8 @@ void main() {
       final manager = DefaultCacheManager(
         httpClientFactory: () {
           final mock = http_testing.MockClient(
-            (request) async => throw const io.SocketException('Connection refused'),
+            (request) async =>
+                throw const io.SocketException('Connection refused'),
           );
           return _CloseTrackingClient(mock, onClose: () {
             clientClosed = true;
@@ -296,23 +295,21 @@ void main() {
       );
 
       final loader = ImageLoader();
-      await loader
-          .loadImageAsync(
-            url,
-            null,
-            chunkEvents,
-            (ui.ImmutableBuffer buffer,
-                {ui.TargetImageSizeCallback? getTargetSize}) async {
-              return await ui.instantiateImageCodecFromBuffer(buffer);
-            },
-            fakeCacheManager,
-            null,
-            null,
-            null,
-            ImageRenderMethodForWeb.HttpGet,
-            () {},
-          )
-          .toList();
+      await loader.loadImageAsync(
+        url,
+        null,
+        chunkEvents,
+        (ui.ImmutableBuffer buffer,
+            {ui.TargetImageSizeCallback? getTargetSize}) async {
+          return await ui.instantiateImageCodecFromBuffer(buffer);
+        },
+        fakeCacheManager,
+        null,
+        null,
+        null,
+        ImageRenderMethodForWeb.HttpGet,
+        () {},
+      ).toList();
 
       // chunkEvents should be closed (done callback fired)
       expect(chunkStreamDone, isTrue,
@@ -356,8 +353,7 @@ void main() {
 
       // chunkEvents should still be closed even on error (finally block)
       expect(chunkStreamDone, isTrue,
-          reason:
-              'chunkEvents StreamController must be closed even on error');
+          reason: 'chunkEvents StreamController must be closed even on error');
     });
   });
 
@@ -365,8 +361,7 @@ void main() {
   // 5. MultiImageStreamCompleter — subscription & timer cleanup
   // ===========================================================================
   group('Leak: MultiImageStreamCompleter disposal', () {
-    testWidgets(
-        'chunkSubscription is cancelled when all listeners removed',
+    testWidgets('chunkSubscription is cancelled when all listeners removed',
         (tester) async {
       const url = 'https://example.com/multi-dispose.png';
       final fakeCacheManager = FakeCacheManager();
@@ -403,8 +398,7 @@ void main() {
       // (but won't get new frames since codec stream is done)
     });
 
-    testWidgets('keepAlive handle prevents premature disposal',
-        (tester) async {
+    testWidgets('keepAlive handle prevents premature disposal', (tester) async {
       const url = 'https://example.com/keepalive.png';
       final fakeCacheManager = FakeCacheManager();
       fakeCacheManager.returns(url, kTransparentImage);
@@ -452,8 +446,7 @@ void main() {
       PaintingBinding.instance.imageCache.clearLiveImages();
     });
 
-    testWidgets(
-        'loadImage cleans up on error without errorListener',
+    testWidgets('loadImage cleans up on error without errorListener',
         (tester) async {
       const url = 'https://example.com/provider-error-no-listener.png';
       fakeCacheManager.throwsNotFound(url);
@@ -482,8 +475,7 @@ void main() {
       FlutterError.onError = originalOnError;
     });
 
-    testWidgets(
-        'loadBuffer cleans up on error without errorListener',
+    testWidgets('loadBuffer cleans up on error without errorListener',
         (tester) async {
       const url = 'https://example.com/buffer-error-no-listener.png';
       fakeCacheManager.throwsNotFound(url);

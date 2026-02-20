@@ -23,8 +23,7 @@ void main() {
   group('CachedNetworkImage.evictFromCache', () {
     test('calls removeFile on cache manager', () async {
       final mockCacheManager = MockBaseCacheManager();
-      when(() => mockCacheManager.removeFile(any()))
-          .thenAnswer((_) async {});
+      when(() => mockCacheManager.removeFile(any())).thenAnswer((_) async {});
 
       // evictFromCache should call removeFile
       await CachedNetworkImage.evictFromCache(
@@ -38,8 +37,7 @@ void main() {
 
     test('uses cacheKey when provided', () async {
       final mockCacheManager = MockBaseCacheManager();
-      when(() => mockCacheManager.removeFile(any()))
-          .thenAnswer((_) async {});
+      when(() => mockCacheManager.removeFile(any())).thenAnswer((_) async {});
 
       await CachedNetworkImage.evictFromCache(
         'https://example.com/img.png',

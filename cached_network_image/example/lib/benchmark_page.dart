@@ -40,7 +40,7 @@ class _BenchmarkContentState extends State<BenchmarkContent>
                   strokeWidth: 2,
                   color: Colors.white,
                 ),
-              ) 
+              )
             : const Icon(Icons.play_arrow),
         label: Text(_running ? 'Running...' : 'Run'),
       ),

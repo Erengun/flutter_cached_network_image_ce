@@ -9,7 +9,6 @@ import 'package:cached_network_image_platform_interface_ce'
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:flutter/material.dart';
 
-
 /// ImageLoader class to load images on IO platforms.
 class ImageLoader implements platform.ImageLoader {
   @Deprecated('Use loadImageAsync instead')

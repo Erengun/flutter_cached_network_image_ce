@@ -127,7 +127,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   String _getFileExtensionFromUrl(String url) {
     try {
       final uri = Uri.parse(url);
-      final pathSegment = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
+      final pathSegment =
+          uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
       if (pathSegment.contains('.')) {
         return pathSegment.split('.').last.toLowerCase();
       }
@@ -174,7 +175,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     if (cachedFile == null || cachedFile.validTill.isBefore(DateTime.now())) {
       try {
-        await for (final response in _downloadFile(url, key, headers, withProgress)) {
+        await for (final response
+            in _downloadFile(url, key, headers, withProgress)) {
           if (response is DownloadProgress && withProgress) {
             controller.add(response);
           }
@@ -259,13 +261,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final cacheHeaders = response.headers;
       final eTag = cacheHeaders['etag'];
 
-      await _cacheBox!.put(key, CacheEntryMetadata(
-        url: url,
-        relativePath: relativePath,
-        validTill: validTill,
-        eTag: eTag,
-        length: receivedBytes,
-      ).toMap());
+      await _cacheBox!.put(
+          key,
+          CacheEntryMetadata(
+            url: url,
+            relativePath: relativePath,
+            validTill: validTill,
+            eTag: eTag,
+            length: receivedBytes,
+          ).toMap());
 
       final localFile = const LocalFileSystem().file(filePath);
       yield FileInfo(localFile, FileSource.Online, validTill, url);
@@ -295,7 +299,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final localFile = const LocalFileSystem().file(filePath);
-    return FileInfo(localFile, FileSource.Cache, metadata.validTill, metadata.url);
+    return FileInfo(
+        localFile, FileSource.Cache, metadata.validTill, metadata.url);
   }
 
   @override
@@ -317,13 +322,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await file.writeAsBytes(fileBytes);
 
     final validTill = DateTime.now().add(maxAge);
-    _cacheBox!.put(key, CacheEntryMetadata(
-      url: url,
-      relativePath: relativePath,
-      validTill: validTill,
-      eTag: eTag,
-      length: fileBytes.length,
-    ).toMap());
+    _cacheBox!.put(
+        key,
+        CacheEntryMetadata(
+          url: url,
+          relativePath: relativePath,
+          validTill: validTill,
+          eTag: eTag,
+          length: fileBytes.length,
+        ).toMap());
 
     return const LocalFileSystem().file(filePath);
   }
@@ -517,8 +524,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     final image = await _decodeImage(originalFile.file);
 
-    final shouldResize =
-        (maxWidth != null && image.width > maxWidth) ||
+    final shouldResize = (maxWidth != null && image.width > maxWidth) ||
         (maxHeight != null && image.height > maxHeight);
     if (!shouldResize) return originalFile;
 

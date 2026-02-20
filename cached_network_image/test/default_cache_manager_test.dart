@@ -132,8 +132,8 @@ void main() {
     });
 
     test('getFileFromCache returns null for non-existent key', () async {
-      final cached = await manager
-          .getFileFromCache('non-existent-${DateTime.now().millisecondsSinceEpoch}');
+      final cached = await manager.getFileFromCache(
+          'non-existent-${DateTime.now().millisecondsSinceEpoch}');
       expect(cached, isNull);
     });
 
@@ -259,9 +259,8 @@ void main() {
       );
 
       const url = 'https://example.com/progress-test.dat';
-      final events = await manager
-          .getFileStream(url, withProgress: true)
-          .toList();
+      final events =
+          await manager.getFileStream(url, withProgress: true).toList();
 
       final progressEvents = events.whereType<DownloadProgress>().toList();
       final fileInfos = events.whereType<FileInfo>().toList();
@@ -283,17 +282,16 @@ void main() {
         ),
       );
 
-      await manager
-          .getFileStream(
-            'https://example.com/auth-test.dat',
-            headers: {'Authorization': 'Bearer token123'},
-          )
-          .toList();
+      await manager.getFileStream(
+        'https://example.com/auth-test.dat',
+        headers: {'Authorization': 'Bearer token123'},
+      ).toList();
 
       expect(receivedAuth, 'Bearer token123');
     });
 
-    test('error on HTTP 404 is propagated to stream (no cached file)', () async {
+    test('error on HTTP 404 is propagated to stream (no cached file)',
+        () async {
       manager = DefaultCacheManager(
         httpClientFactory: () => http_testing.MockClient(
           (request) async => http.Response('Not Found', 404),
@@ -515,8 +513,7 @@ void main() {
       );
 
       const url = 'https://example.com/key-image.png';
-      final events =
-          await manager.getImageFile(url, key: 'my-key').toList();
+      final events = await manager.getImageFile(url, key: 'my-key').toList();
       expect(events.whereType<FileInfo>().isNotEmpty, isTrue);
     });
   });
@@ -538,9 +535,7 @@ void main() {
           .toList();
 
       // URL without extension
-      await manager
-          .getFileStream('https://example.com/images/noext')
-          .toList();
+      await manager.getFileStream('https://example.com/images/noext').toList();
 
       await manager.emptyCache();
       await manager.dispose();
@@ -571,8 +566,8 @@ void main() {
 
       final url =
           'https://example.com/cleanup-test-${DateTime.now().millisecondsSinceEpoch}.bin';
-      await manager1.putFile(url, [1, 2, 3], fileExtension: 'bin',
-          maxAge: Duration.zero);
+      await manager1.putFile(url, [1, 2, 3],
+          fileExtension: 'bin', maxAge: Duration.zero);
       await manager1.dispose();
 
       // Wait a bit for the entry to expire
@@ -628,8 +623,8 @@ void main() {
       // Count remaining entries — there should be at most 2
       var remainingCount = 0;
       for (var i = 0; i < 4; i++) {
-        final cached =
-            await manager2.getFileFromCache('https://example.com/limit-$i-$now.bin');
+        final cached = await manager2
+            .getFileFromCache('https://example.com/limit-$i-$now.bin');
         if (cached != null) remainingCount++;
       }
 

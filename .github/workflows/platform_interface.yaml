@@ -13,7 +13,7 @@ on:
       - "cached_network_image_platform_interface/**"
       - ".github/workflows/platform_interface.yaml"
   pull_request:
-    branches: [develop]
+    branches: [develop, main]
     paths:
       - "cached_network_image_platform_interface/**"
       - ".github/workflows/platform_interface.yaml"

@@ -1,19 +1,51 @@
+# See Dependabot documentation for all configuration options:
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
 version: 2
-enable-beta-ecosystems: true
 updates:
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    groups:
+      all-github-actions:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
+
+  # Dart/Flutter packages
   - package-ecosystem: "pub"
     directory: "/cached_network_image/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "pub"
     directory: "/cached_network_image_platform_interface/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
   - package-ecosystem: "pub"
     directory: "/cached_network_image_web/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+
+  # Android example app — Gradle, AGP, Kotlin
+  - package-ecosystem: "gradle"
+    directories:
+      - /cached_network_image/example/android
+      - /cached_network_image/example/android/app
+    commit-message:
+      prefix: "[dependabot]"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      kotlin-gradle-plugin:
+        patterns:
+          - "org.jetbrains.kotlin:kotlin-gradle-plugin"
+      gradle-plugin:
+        patterns:
+          - "com.android.tools.build:gradle"
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types: ["version-update:semver-patch"]

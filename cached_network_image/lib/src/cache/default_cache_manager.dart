@@ -74,16 +74,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ///
   /// [stalePeriod] is how long a file remains valid in the cache.
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
+  /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
-  });
+    http.Client Function()? httpClientFactory,
+  }) : _httpClientFactory = httpClientFactory ?? http.Client.new;
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
 
   /// Maximum number of objects in the cache before cleanup.
   final int maxNrOfCacheObjects;
+
+  /// Factory for creating HTTP clients (injectable for testing).
+  final http.Client Function() _httpClientFactory;
 
   Box<Map>? _cacheBox;
   String? _cacheDir;
@@ -122,7 +127,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   String _getFileExtensionFromUrl(String url) {
     try {
       final uri = Uri.parse(url);
-      final pathSegment = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
+      final pathSegment =
+          uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
       if (pathSegment.contains('.')) {
         return pathSegment.split('.').last.toLowerCase();
       }
@@ -169,7 +175,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     if (cachedFile == null || cachedFile.validTill.isBefore(DateTime.now())) {
       try {
-        await for (final response in _downloadFile(url, key, headers, withProgress)) {
+        await for (final response
+            in _downloadFile(url, key, headers, withProgress)) {
           if (response is DownloadProgress && withProgress) {
             controller.add(response);
           }
@@ -214,7 +221,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       request.headers.addAll(headers);
     }
 
-    final client = http.Client();
+    final client = _httpClientFactory();
     try {
       final response = await client.send(request);
 
@@ -254,13 +261,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final cacheHeaders = response.headers;
       final eTag = cacheHeaders['etag'];
 
-      _cacheBox!.put(key, CacheEntryMetadata(
-        url: url,
-        relativePath: relativePath,
-        validTill: validTill,
-        eTag: eTag,
-        length: receivedBytes,
-      ).toMap());
+      await _cacheBox!.put(
+          key,
+          CacheEntryMetadata(
+            url: url,
+            relativePath: relativePath,
+            validTill: validTill,
+            eTag: eTag,
+            length: receivedBytes,
+          ).toMap());
 
       final localFile = const LocalFileSystem().file(filePath);
       yield FileInfo(localFile, FileSource.Online, validTill, url);
@@ -290,7 +299,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final localFile = const LocalFileSystem().file(filePath);
-    return FileInfo(localFile, FileSource.Cache, metadata.validTill, metadata.url);
+    return FileInfo(
+        localFile, FileSource.Cache, metadata.validTill, metadata.url);
   }
 
   @override
@@ -312,13 +322,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await file.writeAsBytes(fileBytes);
 
     final validTill = DateTime.now().add(maxAge);
-    _cacheBox!.put(key, CacheEntryMetadata(
-      url: url,
-      relativePath: relativePath,
-      validTill: validTill,
-      eTag: eTag,
-      length: fileBytes.length,
-    ).toMap());
+    _cacheBox!.put(
+        key,
+        CacheEntryMetadata(
+          url: url,
+          relativePath: relativePath,
+          validTill: validTill,
+          eTag: eTag,
+          length: fileBytes.length,
+        ).toMap());
 
     return const LocalFileSystem().file(filePath);
   }
@@ -512,11 +524,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     final image = await _decodeImage(originalFile.file);
 
-    final shouldResize = maxWidth != null
-        ? image.width > maxWidth
-        : false || maxHeight != null
-            ? image.height > maxHeight
-            : false;
+    final shouldResize = (maxWidth != null && image.width > maxWidth) ||
+        (maxHeight != null && image.height > maxHeight);
     if (!shouldResize) return originalFile;
 
     if (maxWidth != null && maxHeight != null) {

@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package:
+          - cached_network_image
+          - cached_network_image_platform_interface
+          - cached_network_image_web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: ./${{ matrix.package }}
+      - name: Analyze
+        run: flutter analyze
+        working-directory: ./${{ matrix.package }}
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - package: cached_network_image
+            test_args: ""
+          - package: cached_network_image_platform_interface
+            test_args: ""
+          - package: cached_network_image_web
+            test_args: "--platform chrome"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: ./${{ matrix.package }}
+      - name: Run tests
+        run: flutter test ${{ matrix.test_args }}
+        working-directory: ./${{ matrix.package }}

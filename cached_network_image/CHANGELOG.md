@@ -1,3 +1,11 @@
+## [4.1.1] - 2026-02-20
+
+* **Fix:** Removed global `Hive.init()` usage from `DefaultCacheManager` to avoid conflicts with host app Hive initialization
+* **Fix:** Added initialization synchronization in `DefaultCacheManager` to prevent parallel cold-start race conditions
+* **Fix:** Switched cache metadata box opening to explicit `openBox(path: ...)` on a private Hive instance for reliable isolation
+* **Feature:** Added optional `cacheDirectoryProvider` parameter to `DefaultCacheManager` so apps can control cache storage location
+* **Tests:** Added regression tests for Hive init conflicts, concurrent initialization races, and cache directory resilience scenarios
+
 ## [4.1.0] - 2026-02-19
 
 * **Feature:** Added `httpClientFactory` parameter to `DefaultCacheManager` for HTTP client dependency injection, enabling easy mocking in tests

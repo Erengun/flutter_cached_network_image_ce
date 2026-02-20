@@ -245,10 +245,10 @@ void main() {
 
     test('cacheLogger can be replaced', () {
       final original = cacheLogger;
+      addTearDown(() => cacheLogger = original);
       final custom = CacheLogger();
       cacheLogger = custom;
       expect(cacheLogger, same(custom));
-      cacheLogger = original;
     });
   });
 }

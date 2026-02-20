@@ -124,17 +124,28 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Uses a [Completer] to ensure that only one initialization runs at a
   /// time, even when multiple callers invoke this concurrently.
   Future<void> _ensureInitialized() {
-    if (_initCompleter != null) return _initCompleter!.future;
-    _initCompleter = Completer<void>();
+    final currentCompleter = _initCompleter;
+    if (currentCompleter != null) return currentCompleter.future;
+
+    final completer = Completer<void>();
+    _initCompleter = completer;
+
     _doInit().then((_) {
-      _initCompleter!.complete();
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
     }).catchError((Object e, StackTrace s) {
-      // Allow retry on next call by clearing the completer.
-      final completer = _initCompleter!;
-      _initCompleter = null;
-      completer.completeError(e, s);
+      // Allow retry on next call by clearing the completer that initiated
+      // this initialization sequence.
+      if (identical(_initCompleter, completer)) {
+        _initCompleter = null;
+      }
+      if (!completer.isCompleted) {
+        completer.completeError(e, s);
+      }
     });
-    return _initCompleter!.future;
+
+    return completer.future;
   }
 
   Future<void> _doInit() async {
@@ -412,10 +423,22 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   @override
   Future<void> dispose() async {
+    final inFlightInit = _initCompleter;
+    if (inFlightInit != null) {
+      try {
+        await inFlightInit.future;
+      } on Object catch (_) {
+        // Ignore init errors during dispose.
+      }
+    }
+
     if (_cacheBox != null && _cacheBox!.isOpen) {
       await _cacheBox!.close();
     }
     await _hive.close();
+
+    _cacheBox = null;
+    _cacheDir = null;
     _initCompleter = null;
   }
 

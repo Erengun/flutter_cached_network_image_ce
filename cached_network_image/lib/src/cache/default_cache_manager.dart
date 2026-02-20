@@ -259,7 +259,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final cacheHeaders = response.headers;
       final eTag = cacheHeaders['etag'];
 
-      _cacheBox!.put(key, CacheEntryMetadata(
+      await _cacheBox!.put(key, CacheEntryMetadata(
         url: url,
         relativePath: relativePath,
         validTill: validTill,
@@ -517,11 +517,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     final image = await _decodeImage(originalFile.file);
 
-    final shouldResize = maxWidth != null
-        ? image.width > maxWidth
-        : false || maxHeight != null
-            ? image.height > maxHeight
-            : false;
+    final shouldResize =
+        (maxWidth != null && image.width > maxWidth) ||
+        (maxHeight != null && image.height > maxHeight);
     if (!shouldResize) return originalFile;
 
     if (maxWidth != null && maxHeight != null) {

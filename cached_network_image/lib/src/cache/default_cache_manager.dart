@@ -8,6 +8,8 @@ import 'package:file/file.dart';
 import 'package:file/local.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hive_ce/hive.dart';
+// ignore: implementation_imports
+import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -67,6 +69,11 @@ class CacheEntryMetadata {
   }
 }
 
+/// Signature for a function that returns the cache base directory.
+///
+/// Defaults to [getTemporaryDirectory] when not specified.
+typedef CacheDirectoryProvider = Future<io.Directory> Function();
+
 /// Default cache manager implementation using Hive CE for metadata storage,
 /// the http package for downloads, and path_provider for file system access.
 class DefaultCacheManager extends CacheManager with ImageCacheManager {
@@ -75,11 +82,18 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// [stalePeriod] is how long a file remains valid in the cache.
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
   /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
+  /// [cacheDirectoryProvider] allows overriding where cache files are stored.
+  ///   Defaults to [getTemporaryDirectory]. Pass [getApplicationSupportDirectory]
+  ///   if you need a more persistent location (but note that files may be
+  ///   backed up on iOS/Android).
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
     http.Client Function()? httpClientFactory,
-  }) : _httpClientFactory = httpClientFactory ?? http.Client.new;
+    CacheDirectoryProvider? cacheDirectoryProvider,
+  })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
+        _cacheDirectoryProvider =
+            cacheDirectoryProvider ?? getTemporaryDirectory;
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
@@ -90,24 +104,51 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Factory for creating HTTP clients (injectable for testing).
   final http.Client Function() _httpClientFactory;
 
+  /// Provider for the base cache directory.
+  final CacheDirectoryProvider _cacheDirectoryProvider;
+
+  /// Private Hive instance to avoid conflicts with the host app's global
+  /// [Hive] singleton. Each [DefaultCacheManager] gets its own isolated
+  /// Hive registry.
+  final HiveInterface _hive = HiveImpl();
+
   Box<Map>? _cacheBox;
   String? _cacheDir;
-  bool _initialized = false;
+
+  /// Guards [_doInit] so that concurrent callers (e.g. multiple images
+  /// loading at the same time on cold start) share the same init future.
+  Completer<void>? _initCompleter;
 
   /// Initialize Hive and open the cache metadata box.
-  Future<void> _ensureInitialized() async {
-    if (_initialized) return;
+  ///
+  /// Uses a [Completer] to ensure that only one initialization runs at a
+  /// time, even when multiple callers invoke this concurrently.
+  Future<void> _ensureInitialized() {
+    if (_initCompleter != null) return _initCompleter!.future;
+    _initCompleter = Completer<void>();
+    _doInit().then((_) {
+      _initCompleter!.complete();
+    }).catchError((Object e, StackTrace s) {
+      // Allow retry on next call by clearing the completer.
+      final completer = _initCompleter!;
+      _initCompleter = null;
+      completer.completeError(e, s);
+    });
+    return _initCompleter!.future;
+  }
 
-    final dir = await getTemporaryDirectory();
+  Future<void> _doInit() async {
+    final dir = await _cacheDirectoryProvider();
     _cacheDir = path.join(dir.path, 'cached_network_image_ce');
     await io.Directory(_cacheDir!).create(recursive: true);
 
-    if (!Hive.isBoxOpen(_kBoxName)) {
-      Hive.init(path.join(_cacheDir!, 'hive'));
-    }
+    final hivePath = path.join(_cacheDir!, 'hive');
+    await io.Directory(hivePath).create(recursive: true);
 
-    _cacheBox = await Hive.openBox<Map>(_kBoxName);
-    _initialized = true;
+    // Open the box with an explicit path on the private Hive instance.
+    // This avoids calling Hive.init() which would conflict with the
+    // host application's own Hive initialization.
+    _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
 
     // Run cleanup in background
     unawaited(_cleanupOldFiles());
@@ -374,7 +415,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     if (_cacheBox != null && _cacheBox!.isOpen) {
       await _cacheBox!.close();
     }
-    _initialized = false;
+    await _hive.close();
+    _initCompleter = null;
   }
 
   /// Clean up files that haven't been used in a while.

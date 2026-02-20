@@ -93,7 +93,8 @@ void main() {
       expect(cached, isNotNull);
 
       // Verify files are in the custom directory
-      final cacheSubDir = io.Directory('${customDir.path}/cached_network_image_ce');
+      final cacheSubDir =
+          io.Directory('${customDir.path}/cached_network_image_ce');
       expect(cacheSubDir.existsSync(), isTrue);
 
       await manager.emptyCache();
@@ -172,8 +173,7 @@ void main() {
     test('does not conflict with global Hive singleton', () async {
       // Simulate host app calling Hive.init with a different path
       // (this would previously cause problems)
-      final hostDir =
-          io.Directory.systemTemp.createTempSync('host_hive_dir_');
+      final hostDir = io.Directory.systemTemp.createTempSync('host_hive_dir_');
       addTearDown(() {
         try {
           hostDir.deleteSync(recursive: true);
@@ -197,12 +197,11 @@ void main() {
       await manager.dispose();
     });
 
-    test('two DefaultCacheManager instances with separate dirs work independently',
+    test(
+        'two DefaultCacheManager instances with separate dirs work independently',
         () async {
-      final dir1 =
-          io.Directory.systemTemp.createTempSync('manager1_');
-      final dir2 =
-          io.Directory.systemTemp.createTempSync('manager2_');
+      final dir1 = io.Directory.systemTemp.createTempSync('manager1_');
+      final dir2 = io.Directory.systemTemp.createTempSync('manager2_');
       addTearDown(() {
         try {
           dir1.deleteSync(recursive: true);
@@ -259,8 +258,7 @@ void main() {
   group('Regression: no global Hive.init conflict', () {
     test('library works after host app calls Hive.init with a different path',
         () async {
-      final hostDir =
-          io.Directory.systemTemp.createTempSync('host_hive_init_');
+      final hostDir = io.Directory.systemTemp.createTempSync('host_hive_init_');
       addTearDown(() {
         try {
           Hive.close();

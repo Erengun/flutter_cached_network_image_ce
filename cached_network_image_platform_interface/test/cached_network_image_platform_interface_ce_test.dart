@@ -196,6 +196,7 @@ void main() {
   group('CacheLogger', () {
     test('log records call when log level is sufficient', () {
       final oldLogLevel = CacheManager.logLevel;
+      addTearDown(() => CacheManager.logLevel = oldLogLevel);
       CacheManager.logLevel = CacheManagerLogLevel.verbose;
 
       final logger = _TestCacheLogger();
@@ -204,26 +205,24 @@ void main() {
       expect(logger.calls, hasLength(1));
       expect(logger.calls.first.message, 'Test message');
       expect(logger.calls.first.level, CacheManagerLogLevel.verbose);
-
-      CacheManager.logLevel = oldLogLevel;
     });
 
     test('log does not record when log level is insufficient', () {
       final oldLogLevel = CacheManager.logLevel;
+      addTearDown(() => CacheManager.logLevel = oldLogLevel);
       CacheManager.logLevel = CacheManagerLogLevel.none;
 
       final logger = _TestCacheLogger();
       logger.log('Test message', CacheManagerLogLevel.verbose);
 
       expect(logger.calls, isEmpty);
-
-      CacheManager.logLevel = oldLogLevel;
     });
   });
 
   group('CacheManager', () {
     test('logLevel static get/set works', () {
       final oldLevel = CacheManager.logLevel;
+      addTearDown(() => CacheManager.logLevel = oldLevel);
 
       CacheManager.logLevel = CacheManagerLogLevel.debug;
       expect(CacheManager.logLevel, CacheManagerLogLevel.debug);
@@ -236,8 +235,6 @@ void main() {
 
       CacheManager.logLevel = CacheManagerLogLevel.none;
       expect(CacheManager.logLevel, CacheManagerLogLevel.none);
-
-      CacheManager.logLevel = oldLevel;
     });
   });
 

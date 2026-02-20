@@ -32,6 +32,7 @@ updates:
   # Android example app — Gradle, AGP, Kotlin
   - package-ecosystem: "gradle"
     directories:
+      - /cached_network_image/example/android
       - /cached_network_image/example/android/app
     commit-message:
       prefix: "[dependabot]"

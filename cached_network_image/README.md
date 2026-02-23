@@ -121,6 +121,10 @@ detects SVG bytes it throws an `UnsupportedImageFormatException`. Use the
 `unsupportedImageBuilder` callback to render them with any SVG package you
 prefer (e.g. [`flutter_svg`](https://pub.dev/packages/flutter_svg)):
 
+Before using `SvgPicture.memory`, add `flutter_svg` to `pubspec.yaml`
+(`dependencies: flutter_svg: ^2.2.1`) and import
+`package:flutter_svg/flutter_svg.dart`.
+
 ```dart
 CachedNetworkImage(
   imageUrl: 'https://example.com/image.svg',

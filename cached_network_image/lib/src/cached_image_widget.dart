@@ -295,6 +295,11 @@ class CachedNetworkImage extends StatelessWidget {
         placeholder != null ? _octoPlaceholderBuilder : null;
     final octoProgressIndicatorBuilder =
         progressIndicatorBuilder != null ? _octoProgressIndicatorBuilder : null;
+    final hasCustomBuilder = imageBuilder != null ||
+        placeholder != null ||
+        progressIndicatorBuilder != null ||
+        errorWidget != null ||
+        unsupportedImageBuilder != null;
 
     ///If there is no placeholder OctoImage does not fade, so always set an
     ///(empty) placeholder as this always used to be the behaviour of
@@ -309,7 +314,7 @@ class CachedNetworkImage extends StatelessWidget {
       imageBuilder: imageBuilder != null ? _octoImageBuilder : null,
       placeholderBuilder: octoPlaceholderBuilder,
       progressIndicatorBuilder: octoProgressIndicatorBuilder,
-      errorBuilder: _octoErrorBuilder,
+      errorBuilder: hasCustomBuilder ? _octoErrorBuilder : null,
       fadeOutDuration: fadeOutDuration,
       fadeOutCurve: fadeOutCurve,
       fadeInDuration: fadeInDuration,

@@ -120,6 +120,15 @@ class ImageLoader implements platform.ImageLoader {
         if (result is FileInfo) {
           final file = result.file;
           final bytes = await file.readAsBytes();
+          final unsupportedFormat =
+              ImageFormatDetector.detectUnsupportedFormat(bytes);
+          if (unsupportedFormat != null) {
+            throw UnsupportedImageFormatException(
+              bytes: bytes,
+              url: url,
+              detectedFormat: unsupportedFormat,
+            );
+          }
           final decoded = await decode(bytes);
           yield decoded;
         }

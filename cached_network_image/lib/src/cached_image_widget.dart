@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:flutter/material.dart';
@@ -33,6 +35,26 @@ typedef LoadingErrorWidgetBuilder = Widget Function(
   BuildContext context,
   String url,
   Object error,
+);
+
+/// Builder function to create a widget for images whose format is not
+/// supported by Flutter's standard image codec (e.g. SVG).
+///
+/// The [bytes] parameter contains the raw cached file bytes. Use a package
+/// like `flutter_svg` to render them:
+///
+/// ```dart
+/// CachedNetworkImage(
+///   imageUrl: 'https://example.com/image.svg',
+///   unsupportedImageBuilder: (context, url, bytes) {
+///     return SvgPicture.memory(bytes);
+///   },
+/// )
+/// ```
+typedef UnsupportedImageWidgetBuilder = Widget Function(
+  BuildContext context,
+  String url,
+  Uint8List bytes,
 );
 
 /// Image widget to show NetworkImage with caching functionality.
@@ -82,6 +104,19 @@ class CachedNetworkImage extends StatelessWidget {
 
   /// Widget displayed while the target [imageUrl] failed loading.
   final LoadingErrorWidgetBuilder? errorWidget;
+
+  /// Builder for images whose format is not supported by Flutter's standard
+  /// image codec (e.g. SVG).
+  ///
+  /// When set, the image is still downloaded and cached normally. If the
+  /// cached bytes cannot be decoded as a raster image, this builder is called
+  /// with the raw bytes so you can render them with a custom package such as
+  /// `flutter_svg`.
+  ///
+  /// If this is `null` and the image format is unsupported, the
+  /// [errorWidget] builder is called instead (with an
+  /// [UnsupportedImageFormatException]).
+  final UnsupportedImageWidgetBuilder? unsupportedImageBuilder;
 
   /// The duration of the fade-in animation for the [placeholder].
   final Duration? placeholderFadeInDuration;
@@ -216,6 +251,7 @@ class CachedNetworkImage extends StatelessWidget {
     this.placeholder,
     this.progressIndicatorBuilder,
     this.errorWidget,
+    this.unsupportedImageBuilder,
     this.fadeOutDuration = const Duration(milliseconds: 1000),
     this.fadeOutCurve = Curves.easeOut,
     this.fadeInDuration = const Duration(milliseconds: 500),
@@ -273,7 +309,7 @@ class CachedNetworkImage extends StatelessWidget {
       imageBuilder: imageBuilder != null ? _octoImageBuilder : null,
       placeholderBuilder: octoPlaceholderBuilder,
       progressIndicatorBuilder: octoProgressIndicatorBuilder,
-      errorBuilder: errorWidget != null ? _octoErrorBuilder : null,
+      errorBuilder: _octoErrorBuilder,
       fadeOutDuration: fadeOutDuration,
       fadeOutCurve: fadeOutCurve,
       fadeInDuration: fadeInDuration,
@@ -324,6 +360,13 @@ class CachedNetworkImage extends StatelessWidget {
     Object error,
     StackTrace? stackTrace,
   ) {
-    return errorWidget!(context, imageUrl, error);
+    if (error is UnsupportedImageFormatException &&
+        unsupportedImageBuilder != null) {
+      return unsupportedImageBuilder!(context, imageUrl, error.bytes);
+    }
+    if (errorWidget != null) {
+      return errorWidget!(context, imageUrl, error);
+    }
+    return const SizedBox.shrink();
   }
 }

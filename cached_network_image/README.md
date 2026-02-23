@@ -114,6 +114,29 @@ CachedNetworkImage(
 Image(image: CachedNetworkImageProvider(url))
 ```
 
+### SVG Support
+
+Flutter's built-in image codec doesn't support SVG. When `CachedNetworkImage`
+detects SVG bytes it throws an `UnsupportedImageFormatException`. Use the
+`unsupportedImageBuilder` callback to render them with any SVG package you
+prefer (e.g. [`flutter_svg`](https://pub.dev/packages/flutter_svg)):
+
+```dart
+CachedNetworkImage(
+  imageUrl: 'https://example.com/image.svg',
+  unsupportedImageBuilder: (context, url, bytes) {
+    // `bytes` are the already-cached file bytes.
+    return SvgPicture.memory(bytes); // from flutter_svg
+  },
+  placeholder: (context, url) => CircularProgressIndicator(),
+  errorWidget: (context, url, error) => Icon(Icons.error),
+),
+```
+
+The image is still downloaded and cached normally — only the **rendering**
+path is different. If `unsupportedImageBuilder` is not set, the error falls
+through to `errorWidget` with an `UnsupportedImageFormatException`.
+
 ## ❓ FAQ
 
 **Q: Will I lose my users' existing cache if I migrate?**

@@ -1,3 +1,13 @@
+## [4.2.0] - 2026-02-23
+
+* **Feature:** Added SVG support via new `unsupportedImageBuilder` callback
+  * New `UnsupportedImageFormatException` thrown when image format is not supported by Flutter's standard codec
+  * New `ImageFormatDetector` utility with content sniffing for SVG detection
+  * Images are still cached normally; only rendering path differs
+  * Example app updated with SVG demo using `flutter_svg`
+  * 24 new tests added (18 format detection + 6 widget integration)
+  * See README for usage example
+
 ## [4.1.1] - 2026-02-20
 
 * **Fix:** Removed global `Hive.init()` usage from `DefaultCacheManager` to avoid conflicts with host app Hive initialization

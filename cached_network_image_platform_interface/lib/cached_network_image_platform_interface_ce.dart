@@ -11,6 +11,8 @@ import 'src/cache_manager.dart';
 export 'src/cache_manager.dart';
 export 'src/file_response.dart';
 export 'src/http_exception.dart';
+export 'src/image_format_detector.dart';
+export 'src/unsupported_image_format_exception.dart';
 
 /// Listener for errors
 typedef ErrorListener = void Function(Object);

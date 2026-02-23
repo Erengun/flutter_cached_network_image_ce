@@ -42,6 +42,10 @@ jobs:
           architecture: x64
           cache: true
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -74,6 +78,10 @@ jobs:
           architecture: x64
           cache: true
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -100,6 +108,9 @@ jobs:
           channel: "stable"
           architecture: x64
           cache: true
+
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
 
       - name: Download dependencies
         run: flutter pub get
@@ -136,6 +147,10 @@ jobs:
           channel: "stable"
           architecture: x64
           cache: true
+
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
 
       # Download all Flutter packages
       - name: Download dependencies

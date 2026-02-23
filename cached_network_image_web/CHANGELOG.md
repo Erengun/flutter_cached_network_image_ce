@@ -1,3 +1,9 @@
+## [2.1.0] - 2026-02-23
+
+* **Feature:** Added SVG format detection in `HttpGet` loader path
+* Updated to use `ImageFormatDetector` from platform interface 5.1.0
+* Throws `UnsupportedImageFormatException` for SVG bytes before decoding
+
 ## [2.0.1] - 2026-02-19
 
 * Renamed package to `cached_network_image_web_ce`

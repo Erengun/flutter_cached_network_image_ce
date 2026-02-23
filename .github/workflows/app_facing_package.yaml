@@ -42,6 +42,10 @@ jobs:
           architecture: x64
           cache: true
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -73,6 +77,10 @@ jobs:
           channel: "stable"
           architecture: x64
           cache: true
+
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
 
       # Download all Flutter packages
       - name: Download dependencies
@@ -113,6 +121,10 @@ jobs:
           architecture: x64
           cache: true
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -145,6 +157,10 @@ jobs:
           channel: "stable"
           architecture: x64
           cache: true
+
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
 
       # Download all Flutter packages
       - name: Download dependencies
@@ -184,6 +200,10 @@ jobs:
         run: flutter config --enable-macos-desktop
         working-directory: ${{env.source-directory}}
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -221,6 +241,11 @@ jobs:
       - name: Enable Windows
         run: flutter config --enable-windows-desktop
         working-directory: ${{env.source-directory}}
+
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        shell: bash
+        run: bash .github/scripts/setup_overrides.sh
 
       # Download all Flutter packages
       - name: Download dependencies
@@ -269,6 +294,10 @@ jobs:
         run: flutter doctor
         working-directory: ${{env.source-directory}}
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -302,6 +331,10 @@ jobs:
           architecture: x64
           cache: true
 
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
+
       # Download all Flutter packages
       - name: Download dependencies
         run: flutter pub get
@@ -332,6 +365,10 @@ jobs:
           channel: "stable"
           architecture: x64
           cache: true
+
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
 
       # Download all Flutter packages
       - name: Download dependencies
@@ -390,6 +427,10 @@ jobs:
           channel: "stable"
           architecture: x64
           cache: true
+
+      # Create dependency overrides for cross-package resolution
+      - name: Create dependency overrides
+        run: bash .github/scripts/setup_overrides.sh
 
       # Download all Flutter packages
       - name: Download dependencies

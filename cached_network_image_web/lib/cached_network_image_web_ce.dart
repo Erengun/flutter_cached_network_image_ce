@@ -145,10 +145,18 @@ class ImageLoader implements platform.ImageLoader {
               state = _State.waitingForData;
             }
 
-            event.file
-                .readAsBytes()
-                .then((value) => decode(value))
-                .then((data) {
+            event.file.readAsBytes().then((value) {
+              final unsupportedFormat =
+                  ImageFormatDetector.detectUnsupportedFormat(value);
+              if (unsupportedFormat != null) {
+                throw UnsupportedImageFormatException(
+                  bytes: value,
+                  url: url,
+                  detectedFormat: unsupportedFormat,
+                );
+              }
+              return decode(value);
+            }).then((data) {
               streamController.add(data);
               if (state == _State.closing) {
                 streamController.close();

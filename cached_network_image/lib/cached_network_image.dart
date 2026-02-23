@@ -12,7 +12,9 @@ export 'package:cached_network_image_platform_interface_ce/cached_network_image_
         FileResponse,
         FileSource,
         HttpExceptionWithStatus,
-        ImageCacheManager;
+        ImageCacheManager,
+        ImageFormatDetector,
+        UnsupportedImageFormatException;
 
 export 'src/cache/default_cache_manager.dart';
 export 'src/cached_image_widget.dart';

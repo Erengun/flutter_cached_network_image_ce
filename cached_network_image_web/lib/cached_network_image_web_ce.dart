@@ -145,9 +145,7 @@ class ImageLoader implements platform.ImageLoader {
               state = _State.waitingForData;
             }
 
-            event.file
-                .readAsBytes()
-                .then((value) {
+            event.file.readAsBytes().then((value) {
               final unsupportedFormat =
                   ImageFormatDetector.detectUnsupportedFormat(value);
               if (unsupportedFormat != null) {

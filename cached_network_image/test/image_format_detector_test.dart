@@ -8,7 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('ImageFormatDetector.isSvg', () {
     test('detects simple <svg opening tag', () {
-      final bytes = utf8.encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+      final bytes =
+          utf8.encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
       expect(ImageFormatDetector.isSvg(Uint8List.fromList(bytes)), isTrue);
     });
 
@@ -18,7 +19,8 @@ void main() {
     });
 
     test('detects <svg case-insensitively', () {
-      final bytes = utf8.encode('<SVG xmlns="http://www.w3.org/2000/svg"></SVG>');
+      final bytes =
+          utf8.encode('<SVG xmlns="http://www.w3.org/2000/svg"></SVG>');
       expect(ImageFormatDetector.isSvg(Uint8List.fromList(bytes)), isTrue);
     });
 

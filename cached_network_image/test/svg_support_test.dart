@@ -36,8 +36,7 @@ void main() {
   });
 
   group('CachedNetworkImage SVG support', () {
-    testWidgets(
-        'unsupportedImageBuilder is called with SVG bytes',
+    testWidgets('unsupportedImageBuilder is called with SVG bytes',
         (tester) async {
       const imageUrl = 'svg-test';
       cacheManager.returns(imageUrl, kSvgImage);
@@ -95,8 +94,7 @@ void main() {
 
     testWidgets(
         'errorWidget receives UnsupportedImageFormatException when '
-        'unsupportedImageBuilder is null',
-        (tester) async {
+        'unsupportedImageBuilder is null', (tester) async {
       const imageUrl = 'svg-error-fallback-test';
       cacheManager.returns(imageUrl, kSvgImage);
       Object? receivedError;
@@ -121,8 +119,7 @@ void main() {
       expect(find.text('Error fallback'), findsOneWidget);
     });
 
-    testWidgets(
-        'regular raster image does not trigger unsupportedImageBuilder',
+    testWidgets('regular raster image does not trigger unsupportedImageBuilder',
         (tester) async {
       const imageUrl = 'raster-image-test';
       cacheManager.returns(imageUrl, kTransparentImage);

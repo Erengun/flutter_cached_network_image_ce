@@ -72,7 +72,7 @@ class BasicContent extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             _blurHashImage(),
-             _sizedContainer(
+            _sizedContainer(
               CachedNetworkImage(
                 imageUrl:
                     'https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg',
@@ -112,16 +112,17 @@ class BasicContent extends StatelessWidget {
               CachedNetworkImage(
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                imageUrl: 'https://plus.unsplash.com/premium_photo-1695566086196-1cdadbaa1988?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+                imageUrl:
+                    'https://plus.unsplash.com/premium_photo-1695566086196-1cdadbaa1988?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
               ),
             ),
             _sizedContainer(
               CachedNetworkImage(
-                imageUrl: 'https://images.unsplash.com/photo-1644588815329-4705c4418d38?q=80&w=1473&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+                imageUrl:
+                    'https://images.unsplash.com/photo-1644588815329-4705c4418d38?q=80&w=1473&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 imageBuilder: (context, imageProvider) => Container(
                   decoration: BoxDecoration(
                     image: DecorationImage(
-           
                       image: imageProvider,
                       fit: BoxFit.cover,
                       colorFilter: const ColorFilter.mode(
@@ -137,7 +138,8 @@ class BasicContent extends StatelessWidget {
               ),
             ),
             CachedNetworkImage(
-              imageUrl: 'https://images.unsplash.com/photo-1565343486673-fbd3a3ce9331?q=80&w=1471&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+              imageUrl:
+                  'https://images.unsplash.com/photo-1565343486673-fbd3a3ce9331?q=80&w=1471&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
               placeholder: (context, url) => const CircleAvatar(
                 backgroundColor: Colors.amber,
                 radius: 150,
@@ -174,7 +176,8 @@ class BasicContent extends StatelessWidget {
             _sizedContainer(
               CachedNetworkImage(
                 maxHeightDiskCache: 10,
-                imageUrl: 'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+                imageUrl:
+                    'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
                 errorWidget: (context, url, error) => const Icon(Icons.error),
@@ -201,7 +204,8 @@ class BasicContent extends StatelessWidget {
     );
   }
 
-  Widget _sizedContainer(Widget child, {double width = double.infinity, double height = 250}) {
+  Widget _sizedContainer(Widget child,
+      {double width = double.infinity, double height = 250}) {
     return SizedBox(
       width: width,
       height: height,

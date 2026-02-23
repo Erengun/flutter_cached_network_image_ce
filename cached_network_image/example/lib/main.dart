@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'benchmark_page.dart';
 
@@ -71,12 +72,30 @@ class BasicContent extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             _blurHashImage(),
+             _sizedContainer(
+              CachedNetworkImage(
+                imageUrl:
+                    'https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg',
+                placeholder: (context, url) =>
+                    const CircularProgressIndicator(),
+                unsupportedImageBuilder: (context, url, bytes) =>
+                    SvgPicture.memory(
+                  bytes,
+                  fit: BoxFit.contain,
+                ),
+                errorWidget: (context, url, error) => const Icon(Icons.error),
+              ),
+            ),
             _sizedContainer(
               const Image(
+                width: double.infinity,
+                fit: BoxFit.fitWidth,
                 image: CachedNetworkImageProvider(
-                  'https://via.placeholder.com/350x150',
+                  'https://images.unsplash.com/photo-1614517453351-6c1522fc7a56',
                 ),
               ),
+              width: double.infinity,
+              height: 200,
             ),
             _sizedContainer(
               CachedNetworkImage(
@@ -93,15 +112,16 @@ class BasicContent extends StatelessWidget {
               CachedNetworkImage(
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                imageUrl: 'https://via.placeholder.com/200x150',
+                imageUrl: 'https://plus.unsplash.com/premium_photo-1695566086196-1cdadbaa1988?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
               ),
             ),
             _sizedContainer(
               CachedNetworkImage(
-                imageUrl: 'https://via.placeholder.com/300x150',
+                imageUrl: 'https://images.unsplash.com/photo-1644588815329-4705c4418d38?q=80&w=1473&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 imageBuilder: (context, imageProvider) => Container(
                   decoration: BoxDecoration(
                     image: DecorationImage(
+           
                       image: imageProvider,
                       fit: BoxFit.cover,
                       colorFilter: const ColorFilter.mode(
@@ -117,7 +137,7 @@ class BasicContent extends StatelessWidget {
               ),
             ),
             CachedNetworkImage(
-              imageUrl: 'https://via.placeholder.com/300x300',
+              imageUrl: 'https://images.unsplash.com/photo-1565343486673-fbd3a3ce9331?q=80&w=1471&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
               placeholder: (context, url) => const CircleAvatar(
                 backgroundColor: Colors.amber,
                 radius: 150,
@@ -154,7 +174,7 @@ class BasicContent extends StatelessWidget {
             _sizedContainer(
               CachedNetworkImage(
                 maxHeightDiskCache: 10,
-                imageUrl: 'https://via.placeholder.com/350x200',
+                imageUrl: 'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
                 errorWidget: (context, url, error) => const Icon(Icons.error),
@@ -181,10 +201,10 @@ class BasicContent extends StatelessWidget {
     );
   }
 
-  Widget _sizedContainer(Widget child) {
+  Widget _sizedContainer(Widget child, {double width = double.infinity, double height = 250}) {
     return SizedBox(
-      width: 300,
-      height: 150,
+      width: width,
+      height: height,
       child: Center(child: child),
     );
   }

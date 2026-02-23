@@ -1,3 +1,9 @@
+## [5.1.0] - 2026-02-23
+
+* **Feature:** Added `UnsupportedImageFormatException` for non-codec-decodable formats (e.g., SVG)
+* **Feature:** Added `ImageFormatDetector` utility with SVG content sniffing
+* Exported new types for use by platform implementations
+
 ## [5.0.1] - 2026-02-19
 
 * Renamed package to `cached_network_image_platform_interface_ce`

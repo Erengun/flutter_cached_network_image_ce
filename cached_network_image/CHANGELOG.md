@@ -1,3 +1,8 @@
+## [4.3.0] - 2026-02-26
+
+* **Feature/Deprecation:** Added `errorBuilder` to `CachedNetworkImage` and `CachedImageWidget`, which aligns with Flutter's standard `ImageErrorWidgetBuilder`. The old `errorWidget` property is now deprecated.
+* **Fix:** Resolved a memory leak where `errorListener` would prevent `CachedNetworkImage` from being garbage collected. Uses `addEphemeralErrorListener` on Flutter >= 3.16.
+
 ## [4.2.0] - 2026-02-23
 
 * **Feature:** Added SVG support via new `unsupportedImageBuilder` callback

@@ -528,7 +528,9 @@ void main() {
       PaintingBinding.instance.imageCache.evict(provider);
     });
 
-    testWidgets('errorListener does not leak ImageStreamCompleter on Flutter >= 3.16', (tester) async {
+    testWidgets(
+        'errorListener does not leak ImageStreamCompleter on Flutter >= 3.16',
+        (tester) async {
       const url = 'https://example.com/buffer-error-listener-leak.png';
       fakeCacheManager.throwsNotFound(url);
 
@@ -551,19 +553,20 @@ void main() {
       );
 
       expect(completer, isA<ImageStreamCompleter>());
-      
+
       // Add a listener
       final listener = ImageStreamListener((image, synchronousCall) {});
       completer.addListener(listener);
-      
+
       await tester.pump();
-      
+
       // Remove the listener
       completer.removeListener(listener);
-      
-      // If addEphemeralErrorListener works correctly, the completer should report 0 active listeners 
+
+      // If addEphemeralErrorListener works correctly, the completer should report 0 active listeners
       // when no standard ImageStreamListeners are attached.
-      expect(completer.hasListeners, isFalse, reason: 'errorListener should not keep the completer alive');
+      expect(completer.hasListeners, isFalse,
+          reason: 'errorListener should not keep the completer alive');
     });
   });
 

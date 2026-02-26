@@ -83,7 +83,8 @@ class BasicContent extends StatelessWidget {
                   bytes,
                   fit: BoxFit.contain,
                 ),
-                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
               ),
             ),
             _sizedContainer(
@@ -134,7 +135,8 @@ class BasicContent extends StatelessWidget {
                 ),
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
               ),
             ),
             CachedNetworkImage(
@@ -155,8 +157,7 @@ class BasicContent extends StatelessWidget {
                     const Icon(Icons.error),
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                imageUrl:
-                    'not a valid uri',
+                imageUrl: 'not a valid uri',
               ),
             ),
             _sizedContainer(
@@ -164,7 +165,8 @@ class BasicContent extends StatelessWidget {
                 imageUrl: 'not a uri at all',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
                 errorListener: (e) {
                   if (e is SocketException) {
                     debugPrint(
@@ -182,7 +184,8 @@ class BasicContent extends StatelessWidget {
                     'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
                 fadeInDuration: const Duration(seconds: 3),
               ),
             ),

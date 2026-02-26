@@ -103,7 +103,11 @@ class CachedNetworkImage extends StatelessWidget {
   final ProgressIndicatorBuilder? progressIndicatorBuilder;
 
   /// Widget displayed while the target [imageUrl] failed loading.
+  @Deprecated('Use errorBuilder instead.')
   final LoadingErrorWidgetBuilder? errorWidget;
+
+  /// Builder displayed while the target [imageUrl] failed loading.
+  final ImageErrorWidgetBuilder? errorBuilder;
 
   /// Builder for images whose format is not supported by Flutter's standard
   /// image codec (e.g. SVG).
@@ -250,7 +254,9 @@ class CachedNetworkImage extends StatelessWidget {
     this.imageBuilder,
     this.placeholder,
     this.progressIndicatorBuilder,
+    @Deprecated('Use errorBuilder instead.')
     this.errorWidget,
+    this.errorBuilder,
     this.unsupportedImageBuilder,
     this.fadeOutDuration = const Duration(milliseconds: 1000),
     this.fadeOutCurve = Curves.easeOut,
@@ -299,6 +305,7 @@ class CachedNetworkImage extends StatelessWidget {
         placeholder != null ||
         progressIndicatorBuilder != null ||
         errorWidget != null ||
+        errorBuilder != null ||
         unsupportedImageBuilder != null;
 
     ///If there is no placeholder OctoImage does not fade, so always set an
@@ -368,6 +375,9 @@ class CachedNetworkImage extends StatelessWidget {
     if (error is UnsupportedImageFormatException &&
         unsupportedImageBuilder != null) {
       return unsupportedImageBuilder!(context, imageUrl, error.bytes);
+    }
+    if (errorBuilder != null) {
+      return errorBuilder!(context, error, stackTrace);
     }
     if (errorWidget != null) {
       return errorWidget!(context, imageUrl, error);

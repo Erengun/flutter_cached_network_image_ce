@@ -454,6 +454,7 @@ void main() {
       // Suppress expected image codec error from reportError
       final originalOnError = FlutterError.onError;
       FlutterError.onError = (details) {};
+      addTearDown(() => FlutterError.onError = originalOnError);
 
       final provider = CachedNetworkImageProvider(
         url,
@@ -471,8 +472,6 @@ void main() {
 
       expect(completer, isA<ImageStreamCompleter>());
       await tester.pump();
-
-      FlutterError.onError = originalOnError;
     });
 
     testWidgets('loadBuffer cleans up on error without errorListener',
@@ -483,6 +482,7 @@ void main() {
       // Suppress expected image codec error from reportError
       final originalOnError = FlutterError.onError;
       FlutterError.onError = (details) {};
+      addTearDown(() => FlutterError.onError = originalOnError);
 
       final provider = CachedNetworkImageProvider(
         url,
@@ -501,8 +501,6 @@ void main() {
 
       expect(completer, isA<ImageStreamCompleter>());
       await tester.pump();
-
-      FlutterError.onError = originalOnError;
     });
 
     testWidgets('evictFromCache does not leak', (tester) async {
@@ -528,6 +526,44 @@ void main() {
 
       // Evict from cache — should clean up without leaking
       PaintingBinding.instance.imageCache.evict(provider);
+    });
+
+    testWidgets('errorListener does not leak ImageStreamCompleter on Flutter >= 3.16', (tester) async {
+      const url = 'https://example.com/buffer-error-listener-leak.png';
+      fakeCacheManager.throwsNotFound(url);
+
+      final originalOnError = FlutterError.onError;
+      FlutterError.onError = (details) {};
+      addTearDown(() => FlutterError.onError = originalOnError);
+
+      final provider = CachedNetworkImageProvider(
+        url,
+        cacheManager: fakeCacheManager,
+        errorListener: (e) {},
+      );
+
+      final completer = provider.loadImage(
+        provider,
+        (ui.ImmutableBuffer buffer,
+            {ui.TargetImageSizeCallback? getTargetSize}) async {
+          return await ui.instantiateImageCodecFromBuffer(buffer);
+        },
+      );
+
+      expect(completer, isA<ImageStreamCompleter>());
+      
+      // Add a listener
+      final listener = ImageStreamListener((image, synchronousCall) {});
+      completer.addListener(listener);
+      
+      await tester.pump();
+      
+      // Remove the listener
+      completer.removeListener(listener);
+      
+      // If addEphemeralErrorListener works correctly, the completer should report 0 active listeners 
+      // when no standard ImageStreamListeners are attached.
+      expect(completer.hasListeners, isFalse, reason: 'errorListener should not keep the completer alive');
     });
   });
 

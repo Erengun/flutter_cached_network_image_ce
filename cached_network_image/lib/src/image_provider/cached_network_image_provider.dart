@@ -101,10 +101,15 @@ class CachedNetworkImageProvider
           },
         );
       } on NoSuchMethodError {
-        assert(
-          false,
-          'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
-          'Please upgrade Flutter or avoid using errorListener.',
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: 'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
+                'Please upgrade Flutter or avoid using errorListener.',
+            library: 'cached_network_image',
+            context: ErrorDescription(
+              'CachedNetworkImageProvider.loadBuffer fallback to addListener',
+            ),
+          ),
         );
         imageStreamCompleter.addListener(
           ImageStreamListener(
@@ -168,10 +173,15 @@ class CachedNetworkImageProvider
           },
         );
       } on NoSuchMethodError {
-        assert(
-          false,
-          'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
-          'Please upgrade Flutter or avoid using errorListener.',
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: 'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
+                'Please upgrade Flutter or avoid using errorListener.',
+            library: 'cached_network_image',
+            context: ErrorDescription(
+              'CachedNetworkImageProvider.loadImage fallback to addListener',
+            ),
+          ),
         );
         imageStreamCompleter.addListener(
           ImageStreamListener(

@@ -103,7 +103,8 @@ class CachedNetworkImageProvider
       } on NoSuchMethodError {
         FlutterError.reportError(
           FlutterErrorDetails(
-            exception: 'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
+            exception:
+                'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
                 'Please upgrade Flutter or avoid using errorListener.',
             library: 'cached_network_image',
             context: ErrorDescription(
@@ -175,7 +176,8 @@ class CachedNetworkImageProvider
       } on NoSuchMethodError {
         FlutterError.reportError(
           FlutterErrorDetails(
-            exception: 'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
+            exception:
+                'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
                 'Please upgrade Flutter or avoid using errorListener.',
             library: 'cached_network_image',
             context: ErrorDescription(

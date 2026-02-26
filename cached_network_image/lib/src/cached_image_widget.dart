@@ -254,8 +254,7 @@ class CachedNetworkImage extends StatelessWidget {
     this.imageBuilder,
     this.placeholder,
     this.progressIndicatorBuilder,
-    @Deprecated('Use errorBuilder instead.')
-    this.errorWidget,
+    @Deprecated('Use errorBuilder instead.') this.errorWidget,
     this.errorBuilder,
     this.unsupportedImageBuilder,
     this.fadeOutDuration = const Duration(milliseconds: 1000),

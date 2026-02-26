@@ -46,6 +46,10 @@ class CachedNetworkImageProvider
   final double scale;
 
   /// Listener to be called when images fails to load.
+  ///
+  /// Note: Using this listener with Flutter versions older than 3.16 may
+  /// cause a memory leak if the image fails to load. Please upgrade Flutter
+  /// to avoid this issue.
   final ErrorListener? errorListener;
 
   /// Set headers for the image provider, for example for authentication
@@ -87,14 +91,30 @@ class CachedNetworkImageProvider
     );
 
     if (errorListener != null) {
-      imageStreamCompleter.addListener(
-        ImageStreamListener(
-          (image, synchronousCall) {},
-          onError: (Object error, StackTrace? trace) {
+      // In Flutter >= 3.16, we use addEphemeralErrorListener to avoid memory leaks.
+      // addListener keeps the ImageStreamCompleter alive, which prevents disposal
+      // when there are no other active listeners.
+      try {
+        (imageStreamCompleter as dynamic).addEphemeralErrorListener(
+          (Object error, StackTrace? trace) {
             errorListener?.call(error);
           },
-        ),
-      );
+        );
+      } on NoSuchMethodError {
+        assert(
+          false,
+          'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
+          'Please upgrade Flutter or avoid using errorListener.',
+        );
+        imageStreamCompleter.addListener(
+          ImageStreamListener(
+            (image, synchronousCall) {},
+            onError: (Object error, StackTrace? trace) {
+              errorListener?.call(error);
+            },
+          ),
+        );
+      }
     }
 
     return imageStreamCompleter;
@@ -138,14 +158,30 @@ class CachedNetworkImageProvider
     );
 
     if (errorListener != null) {
-      imageStreamCompleter.addListener(
-        ImageStreamListener(
-          (image, synchronousCall) {},
-          onError: (Object error, StackTrace? trace) {
+      // In Flutter >= 3.16, we use addEphemeralErrorListener to avoid memory leaks.
+      // addListener keeps the ImageStreamCompleter alive, which prevents disposal
+      // when there are no other active listeners.
+      try {
+        (imageStreamCompleter as dynamic).addEphemeralErrorListener(
+          (Object error, StackTrace? trace) {
             errorListener?.call(error);
           },
-        ),
-      );
+        );
+      } on NoSuchMethodError {
+        assert(
+          false,
+          'Warning: Using errorListener with Flutter < 3.16 causes memory leaks. '
+          'Please upgrade Flutter or avoid using errorListener.',
+        );
+        imageStreamCompleter.addListener(
+          ImageStreamListener(
+            (image, synchronousCall) {},
+            onError: (Object error, StackTrace? trace) {
+              errorListener?.call(error);
+            },
+          ),
+        );
+      }
     }
 
     return imageStreamCompleter;

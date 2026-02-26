@@ -83,7 +83,7 @@ class BasicContent extends StatelessWidget {
                   bytes,
                   fit: BoxFit.contain,
                 ),
-                errorWidget: (context, url, error) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
               ),
             ),
             _sizedContainer(
@@ -134,7 +134,7 @@ class BasicContent extends StatelessWidget {
                 ),
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorWidget: (context, url, error) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
               ),
             ),
             CachedNetworkImage(
@@ -151,10 +151,12 @@ class BasicContent extends StatelessWidget {
             ),
             _sizedContainer(
               CachedNetworkImage(
-                imageUrl: 'https://notAvalid.uri',
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorWidget: (context, url, error) => const Icon(Icons.error),
+                imageUrl:
+                    'not a valid uri',
               ),
             ),
             _sizedContainer(
@@ -162,7 +164,7 @@ class BasicContent extends StatelessWidget {
                 imageUrl: 'not a uri at all',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorWidget: (context, url, error) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
                 errorListener: (e) {
                   if (e is SocketException) {
                     debugPrint(
@@ -180,7 +182,7 @@ class BasicContent extends StatelessWidget {
                     'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                errorWidget: (context, url, error) => const Icon(Icons.error),
+                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error),
                 fadeInDuration: const Duration(seconds: 3),
               ),
             ),
@@ -253,7 +255,7 @@ class GridContent extends StatelessWidget {
       itemBuilder: (BuildContext context, int index) => CachedNetworkImage(
         imageUrl: 'https://loremflickr.com/100/100/music?lock=$index',
         placeholder: _loader,
-        errorWidget: _error,
+        errorBuilder: _error,
       ),
     );
   }
@@ -262,7 +264,7 @@ class GridContent extends StatelessWidget {
     return const Center(child: CircularProgressIndicator());
   }
 
-  Widget _error(BuildContext context, String url, Object error) {
+  Widget _error(BuildContext context, Object error, StackTrace? stackTrace) {
     return const Center(child: Icon(Icons.error));
   }
 }

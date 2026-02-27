@@ -27,6 +27,35 @@ class FakeCacheManager extends Mock implements CacheManager {
     );
   }
 
+  /// Stubs [getFileFromCache] to return a [FileInfo] with [FileSource.Cache],
+  /// simulating a disk-cache hit for the pre-check in
+  /// [CachedNetworkImage].
+  void returnsFromCache(String url, List<int> imageData) {
+    final file = MemoryFileSystem().systemTempDirectory.childFile('test.jpg');
+    file.writeAsBytesSync(imageData);
+    when(
+      () => getFileFromCache(
+        url,
+        ignoreMemCache: any(named: 'ignoreMemCache'),
+      ),
+    ).thenAnswer((_) async => FileInfo(
+          file,
+          FileSource.Cache,
+          DateTime.now().add(const Duration(days: 1)),
+          url,
+        ));
+  }
+
+  /// Stubs [getFileFromCache] to return `null`, simulating a cache miss.
+  void returnsNotCached(String url) {
+    when(
+      () => getFileFromCache(
+        url,
+        ignoreMemCache: any(named: 'ignoreMemCache'),
+      ),
+    ).thenAnswer((_) async => null);
+  }
+
   ExpectedData returns(
     String url,
     List<int> imageData, {

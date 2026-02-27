@@ -313,4 +313,142 @@ void main() {
       CachedNetworkImage.logLevel = originalLevel;
     });
   });
+
+  group('CachedNetworkImage placeholder skip on cache hit', () {
+    testWidgets('skips placeholder when image is in disk cache',
+        (tester) async {
+      var imageUrl = 'cached-image-test';
+      cacheManager.returnsFromCache(imageUrl, kTransparentImage);
+      cacheManager.returns(imageUrl, kTransparentImage);
+      var placeholderBuilt = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CachedNetworkImage(
+              imageUrl: imageUrl,
+              cacheManager: cacheManager,
+              placeholder: (context, url) {
+                placeholderBuilt = true;
+                return const CircularProgressIndicator();
+              },
+            ),
+          ),
+        ),
+      );
+      // Let the async cache check complete
+      await tester.pumpAndSettle();
+      expect(placeholderBuilt, isFalse,
+          reason: 'Placeholder should not be shown for cached images');
+    });
+
+    testWidgets('shows placeholder when image is NOT in disk cache',
+        (tester) async {
+      var imageUrl = 'not-cached-image-test';
+      cacheManager.returnsNotCached(imageUrl);
+      cacheManager.returns(imageUrl, kTransparentImage);
+      var placeholderBuilt = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CachedNetworkImage(
+              imageUrl: imageUrl,
+              cacheManager: cacheManager,
+              placeholder: (context, url) {
+                placeholderBuilt = true;
+                return const CircularProgressIndicator();
+              },
+            ),
+          ),
+        ),
+      );
+      // Let the async cache check complete and trigger setState
+      await tester.pump();
+      await tester.pump();
+      expect(placeholderBuilt, isTrue,
+          reason: 'Placeholder should be shown for non-cached images');
+    });
+
+    testWidgets('re-checks cache when imageUrl changes', (tester) async {
+      var cachedUrl = 'cached-url';
+      var uncachedUrl = 'uncached-url';
+      cacheManager.returnsFromCache(cachedUrl, kTransparentImage);
+      cacheManager.returns(cachedUrl, kTransparentImage);
+      cacheManager.returnsNotCached(uncachedUrl);
+      cacheManager.returns(uncachedUrl, kTransparentImage);
+
+      var placeholderBuilt = false;
+      var currentUrl = cachedUrl;
+
+      await tester.pumpWidget(
+        StatefulBuilder(
+          builder: (context, setState) {
+            return MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: currentUrl,
+                      cacheManager: cacheManager,
+                      placeholder: (context, url) {
+                        placeholderBuilt = true;
+                        return const CircularProgressIndicator();
+                      },
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          setState(() => currentUrl = uncachedUrl),
+                      child: const Text('Switch'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(placeholderBuilt, isFalse,
+          reason: 'Placeholder should be skipped for cached URL');
+
+      // Switch to uncached URL
+      placeholderBuilt = false;
+      await tester.tap(find.text('Switch'));
+      await tester.pump();
+      await tester.pump();
+      expect(placeholderBuilt, isTrue,
+          reason:
+              'Placeholder should appear after switching to uncached URL');
+    });
+
+    testWidgets(
+        'always shows placeholder when disablePlaceholderOnCacheHit is false',
+        (tester) async {
+      var imageUrl = 'always-placeholder-test';
+      cacheManager.returnsFromCache(imageUrl, kTransparentImage);
+      cacheManager.returns(imageUrl, kTransparentImage);
+      var placeholderBuilt = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CachedNetworkImage(
+              imageUrl: imageUrl,
+              cacheManager: cacheManager,
+              disablePlaceholderOnCacheHit: false,
+              placeholder: (context, url) {
+                placeholderBuilt = true;
+                return const CircularProgressIndicator();
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(placeholderBuilt, isTrue,
+          reason:
+              'Placeholder should always show when disablePlaceholderOnCacheHit is false');
+    });
+  });
 }

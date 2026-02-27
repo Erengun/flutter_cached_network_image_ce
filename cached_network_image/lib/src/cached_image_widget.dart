@@ -58,7 +58,7 @@ typedef UnsupportedImageWidgetBuilder = Widget Function(
 );
 
 /// Image widget to show NetworkImage with caching functionality.
-class CachedNetworkImage extends StatelessWidget {
+class CachedNetworkImage extends StatefulWidget {
   /// Get the current log level of the cache manager.
   static CacheManagerLogLevel get logLevel => CacheManager.logLevel;
 
@@ -81,8 +81,6 @@ class CachedNetworkImage extends StatelessWidget {
     await effectiveCacheManager.removeFile(cacheKey ?? url);
     return CachedNetworkImageProvider(url, scale: scale).evict();
   }
-
-  final CachedNetworkImageProvider _image;
 
   /// Option to use cacheManager with other settings
   final BaseCacheManager? cacheManager;
@@ -243,11 +241,26 @@ class CachedNetworkImage extends StatelessWidget {
   /// Listener to be called when images fails to load.
   final ValueChanged<Object>? errorListener;
 
+  /// Render option for images on the web platform.
+  final ImageRenderMethodForWeb imageRenderMethodForWeb;
+
+  /// Scale of the image.
+  final double scale;
+
+  /// When true (the default), the placeholder and fade-in/out animations are
+  /// skipped when the image is already available in the disk cache. This
+  /// prevents an unnecessary visual flicker for images that load almost
+  /// instantly from cache.
+  ///
+  /// Set to `false` to always show the placeholder and fade animations,
+  /// regardless of cache status.
+  final bool disablePlaceholderOnCacheHit;
+
   /// CachedNetworkImage shows a network image using a caching mechanism. It also
   /// provides support for a placeholder, showing an error and fading into the
   /// loaded image. Next to that it supports most features of a default Image
   /// widget.
-  CachedNetworkImage({
+  const CachedNetworkImage({
     super.key,
     required this.imageUrl,
     this.httpHeaders,
@@ -279,74 +292,163 @@ class CachedNetworkImage extends StatelessWidget {
     this.maxWidthDiskCache,
     this.maxHeightDiskCache,
     this.errorListener,
-    ImageRenderMethodForWeb imageRenderMethodForWeb =
-        ImageRenderMethodForWeb.HtmlImage,
-    double scale = 1.0,
-  }) : _image = CachedNetworkImageProvider(
-          imageUrl,
-          headers: httpHeaders,
-          cacheManager: cacheManager,
-          cacheKey: cacheKey,
-          imageRenderMethodForWeb: imageRenderMethodForWeb,
-          maxWidth: maxWidthDiskCache,
-          maxHeight: maxHeightDiskCache,
-          errorListener: errorListener,
-          scale: scale,
-        );
+    this.imageRenderMethodForWeb = ImageRenderMethodForWeb.HtmlImage,
+    this.scale = 1.0,
+    this.disablePlaceholderOnCacheHit = true,
+  });
+
+  @override
+  State<CachedNetworkImage> createState() => _CachedNetworkImageState();
+}
+
+class _CachedNetworkImageState extends State<CachedNetworkImage> {
+  late CachedNetworkImageProvider _image;
+
+  /// Whether the placeholder should be suppressed because the image is
+  /// available in the disk cache (and will load almost instantly).
+  ///
+  /// Starts as `true` (optimistic) when [disablePlaceholderOnCacheHit] is
+  /// enabled. If the async cache check reveals the image is NOT cached, this
+  /// flips to `false` and the placeholder appears via [setState].
+  bool _skipPlaceholder = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _createImageProvider();
+    if (widget.disablePlaceholderOnCacheHit) {
+      _skipPlaceholder = true;
+      _preCheckCache();
+    }
+  }
+
+  @override
+  void didUpdateWidget(CachedNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        oldWidget.cacheKey != widget.cacheKey ||
+        oldWidget.cacheManager != widget.cacheManager ||
+        oldWidget.httpHeaders != widget.httpHeaders ||
+        oldWidget.maxWidthDiskCache != widget.maxWidthDiskCache ||
+        oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
+        oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||
+        oldWidget.scale != widget.scale ||
+        oldWidget.errorListener != widget.errorListener) {
+      _createImageProvider();
+
+      if (widget.disablePlaceholderOnCacheHit) {
+        _skipPlaceholder = true;
+        _preCheckCache();
+      } else {
+        _skipPlaceholder = false;
+      }
+    }
+  }
+
+  void _createImageProvider() {
+    _image = CachedNetworkImageProvider(
+      widget.imageUrl,
+      headers: widget.httpHeaders,
+      cacheManager: widget.cacheManager,
+      cacheKey: widget.cacheKey,
+      imageRenderMethodForWeb: widget.imageRenderMethodForWeb,
+      maxWidth: widget.maxWidthDiskCache,
+      maxHeight: widget.maxHeightDiskCache,
+      errorListener: widget.errorListener,
+      scale: widget.scale,
+    );
+  }
+
+  Future<void> _preCheckCache() async {
+    final cm =
+        widget.cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
+    try {
+      final cached =
+          await cm.getFileFromCache(widget.cacheKey ?? widget.imageUrl);
+      if (mounted && cached == null) {
+        setState(() => _skipPlaceholder = false);
+      }
+    } on Object catch (_) {
+      // If the cache check fails, fall back to showing the placeholder.
+      if (mounted) {
+        setState(() => _skipPlaceholder = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    var octoPlaceholderBuilder =
-        placeholder != null ? _octoPlaceholderBuilder : null;
-    final octoProgressIndicatorBuilder =
-        progressIndicatorBuilder != null ? _octoProgressIndicatorBuilder : null;
-    final hasCustomBuilder = imageBuilder != null ||
-        placeholder != null ||
-        progressIndicatorBuilder != null ||
-        errorWidget != null ||
-        errorBuilder != null ||
-        unsupportedImageBuilder != null;
+    final hasCustomBuilder = widget.imageBuilder != null ||
+        widget.placeholder != null ||
+        widget.progressIndicatorBuilder != null ||
+        widget.errorWidget != null ||
+        widget.errorBuilder != null ||
+        widget.unsupportedImageBuilder != null;
 
-    ///If there is no placeholder OctoImage does not fade, so always set an
-    ///(empty) placeholder as this always used to be the behaviour of
-    ///CachedNetworkImage.
-    if (octoPlaceholderBuilder == null &&
-        octoProgressIndicatorBuilder == null) {
-      octoPlaceholderBuilder = (context) => Container();
+    OctoPlaceholderBuilder? octoPlaceholderBuilder;
+    OctoProgressIndicatorBuilder? octoProgressIndicatorBuilder;
+    Duration? effectiveFadeOutDuration = widget.fadeOutDuration;
+    Duration effectiveFadeInDuration = widget.fadeInDuration;
+    Duration? effectivePlaceholderFadeInDuration =
+        widget.placeholderFadeInDuration;
+
+    if (_skipPlaceholder) {
+      // Image is in disk cache — skip placeholder and fade animations
+      // so the image appears instantly.
+      octoPlaceholderBuilder = null;
+      octoProgressIndicatorBuilder = null;
+      effectiveFadeOutDuration = Duration.zero;
+      effectiveFadeInDuration = Duration.zero;
+      effectivePlaceholderFadeInDuration = Duration.zero;
+    } else {
+      octoPlaceholderBuilder =
+          widget.placeholder != null ? _octoPlaceholderBuilder : null;
+      octoProgressIndicatorBuilder = widget.progressIndicatorBuilder != null
+          ? _octoProgressIndicatorBuilder
+          : null;
+
+      /// If there is no placeholder OctoImage does not fade, so always set an
+      /// (empty) placeholder as this always used to be the behaviour of
+      /// CachedNetworkImage.
+      if (octoPlaceholderBuilder == null &&
+          octoProgressIndicatorBuilder == null) {
+        octoPlaceholderBuilder = (context) => Container();
+      }
     }
 
     return OctoImage(
       image: _image,
-      imageBuilder: imageBuilder != null ? _octoImageBuilder : null,
+      imageBuilder: widget.imageBuilder != null ? _octoImageBuilder : null,
       placeholderBuilder: octoPlaceholderBuilder,
       progressIndicatorBuilder: octoProgressIndicatorBuilder,
       errorBuilder: hasCustomBuilder ? _octoErrorBuilder : null,
-      fadeOutDuration: fadeOutDuration,
-      fadeOutCurve: fadeOutCurve,
-      fadeInDuration: fadeInDuration,
-      fadeInCurve: fadeInCurve,
-      width: width,
-      height: height,
-      fit: fit,
-      alignment: alignment,
-      repeat: repeat,
-      matchTextDirection: matchTextDirection,
-      color: color,
-      filterQuality: filterQuality,
-      colorBlendMode: colorBlendMode,
-      placeholderFadeInDuration: placeholderFadeInDuration,
-      gaplessPlayback: useOldImageOnUrlChange,
-      memCacheWidth: memCacheWidth,
-      memCacheHeight: memCacheHeight,
+      fadeOutDuration: effectiveFadeOutDuration,
+      fadeOutCurve: widget.fadeOutCurve,
+      fadeInDuration: effectiveFadeInDuration,
+      fadeInCurve: widget.fadeInCurve,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
+      alignment: widget.alignment,
+      repeat: widget.repeat,
+      matchTextDirection: widget.matchTextDirection,
+      color: widget.color,
+      filterQuality: widget.filterQuality,
+      colorBlendMode: widget.colorBlendMode,
+      placeholderFadeInDuration: effectivePlaceholderFadeInDuration,
+      gaplessPlayback: widget.useOldImageOnUrlChange,
+      memCacheWidth: widget.memCacheWidth,
+      memCacheHeight: widget.memCacheHeight,
     );
   }
 
   Widget _octoImageBuilder(BuildContext context, Widget child) {
-    return imageBuilder!(context, _image);
+    return widget.imageBuilder!(context, _image);
   }
 
   Widget _octoPlaceholderBuilder(BuildContext context) {
-    return placeholder!(context, imageUrl);
+    return widget.placeholder!(context, widget.imageUrl);
   }
 
   Widget _octoProgressIndicatorBuilder(
@@ -359,10 +461,10 @@ class CachedNetworkImage extends StatelessWidget {
       totalSize = progress.expectedTotalBytes;
       downloaded = progress.cumulativeBytesLoaded;
     }
-    return progressIndicatorBuilder!(
+    return widget.progressIndicatorBuilder!(
       context,
-      imageUrl,
-      DownloadProgress(imageUrl, totalSize, downloaded),
+      widget.imageUrl,
+      DownloadProgress(widget.imageUrl, totalSize, downloaded),
     );
   }
 
@@ -372,14 +474,15 @@ class CachedNetworkImage extends StatelessWidget {
     StackTrace? stackTrace,
   ) {
     if (error is UnsupportedImageFormatException &&
-        unsupportedImageBuilder != null) {
-      return unsupportedImageBuilder!(context, imageUrl, error.bytes);
+        widget.unsupportedImageBuilder != null) {
+      return widget.unsupportedImageBuilder!(
+          context, widget.imageUrl, error.bytes);
     }
-    if (errorBuilder != null) {
-      return errorBuilder!(context, error, stackTrace);
+    if (widget.errorBuilder != null) {
+      return widget.errorBuilder!(context, error, stackTrace);
     }
-    if (errorWidget != null) {
-      return errorWidget!(context, imageUrl, error);
+    if (widget.errorWidget != null) {
+      return widget.errorWidget!(context, widget.imageUrl, error);
     }
     return const SizedBox.shrink();
   }

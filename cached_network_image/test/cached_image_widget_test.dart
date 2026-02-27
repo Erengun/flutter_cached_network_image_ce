@@ -397,8 +397,7 @@ void main() {
                       },
                     ),
                     TextButton(
-                      onPressed: () =>
-                          setState(() => currentUrl = uncachedUrl),
+                      onPressed: () => setState(() => currentUrl = uncachedUrl),
                       child: const Text('Switch'),
                     ),
                   ],
@@ -418,8 +417,7 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(placeholderBuilt, isTrue,
-          reason:
-              'Placeholder should appear after switching to uncached URL');
+          reason: 'Placeholder should appear after switching to uncached URL');
     });
 
     testWidgets(

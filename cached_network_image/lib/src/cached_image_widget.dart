@@ -312,6 +312,10 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
   /// flips to `false` and the placeholder appears via [setState].
   bool _skipPlaceholder = false;
 
+  /// Incremented each time [_preCheckCache] is called so that stale async
+  /// completions (from a previous URL or config) are discarded.
+  int _preCheckGeneration = 0;
+
   @override
   void initState() {
     super.initState();
@@ -326,7 +330,7 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
   void didUpdateWidget(CachedNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.imageUrl != widget.imageUrl ||
+    final imageConfigChanged = oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.cacheKey != widget.cacheKey ||
         oldWidget.cacheManager != widget.cacheManager ||
         oldWidget.httpHeaders != widget.httpHeaders ||
@@ -334,9 +338,15 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
         oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
         oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||
         oldWidget.scale != widget.scale ||
-        oldWidget.errorListener != widget.errorListener) {
-      _createImageProvider();
+        oldWidget.errorListener != widget.errorListener;
 
+    if (imageConfigChanged) {
+      _createImageProvider();
+    }
+
+    if (imageConfigChanged ||
+        oldWidget.disablePlaceholderOnCacheHit !=
+            widget.disablePlaceholderOnCacheHit) {
       if (widget.disablePlaceholderOnCacheHit) {
         _skipPlaceholder = true;
         _preCheckCache();
@@ -361,15 +371,18 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
   }
 
   Future<void> _preCheckCache() async {
+    final generation = ++_preCheckGeneration;
     final cm =
         widget.cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
     try {
       final cached =
           await cm.getFileFromCache(widget.cacheKey ?? widget.imageUrl);
+      if (generation != _preCheckGeneration) return;
       if (mounted && cached == null) {
         setState(() => _skipPlaceholder = false);
       }
     } on Object catch (_) {
+      if (generation != _preCheckGeneration) return;
       // If the cache check fails, fall back to showing the placeholder.
       if (mounted) {
         setState(() => _skipPlaceholder = false);

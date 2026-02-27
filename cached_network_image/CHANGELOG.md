@@ -1,3 +1,9 @@
+## [4.4.0] - 2026-02-27
+
+* **Feature:** Skip placeholder and fade animations when images are loaded from disk cache. Cached images now appear instantly without unnecessary visual flicker.
+* Added `disablePlaceholderOnCacheHit` parameter (default `true`) to opt out of this behavior.
+* `CachedNetworkImage` is now a `StatefulWidget` to support async cache pre-checking.
+
 ## [4.3.0] - 2026-02-26
 
 * **Feature/Deprecation:** Added `errorBuilder` to `CachedNetworkImage` and `CachedImageWidget`, which aligns with Flutter's standard `ImageErrorWidgetBuilder`. The old `errorWidget` property is now deprecated.

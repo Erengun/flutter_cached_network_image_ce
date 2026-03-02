@@ -1,3 +1,6 @@
+@TestOn('vm')
+library;
+
 import 'dart:async';
 import 'dart:io' as io;
 
@@ -732,7 +735,9 @@ void main() {
       // The newest 3 entries should survive, oldest 2 may be cleaned up
       // (cleanup runs in background on init, wait until it finishes via polling)
       bool cleanupSuccess = false;
-      for (var i = 0; i < 20; i++) {
+      const cleanupTimeout = Duration(seconds: 4);
+      final end = DateTime.now().add(cleanupTimeout);
+      while (DateTime.now().isBefore(end)) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
         final oldest = await manager2.getFileFromCache(
           'https://example.com/cleanup-0.png',

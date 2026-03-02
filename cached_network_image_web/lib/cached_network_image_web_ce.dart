@@ -4,7 +4,7 @@ library cached_network_image_web_ce;
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'dart:ui_web';
+import 'dart:ui_web' as ui_web;
 
 import 'package:cached_network_image_platform_interface_ce'
         '/cached_network_image_platform_interface_ce.dart' as platform
@@ -36,7 +36,12 @@ class ImageLoader implements platform.ImageLoader {
       chunkEvents,
       (bytes) async {
         final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-        return decode(buffer);
+        return decode(
+          buffer,
+          cacheWidth: maxWidth,
+          cacheHeight: maxHeight,
+          allowUpscaling: false,
+        );
       },
       cacheManager,
       maxHeight,
@@ -66,7 +71,21 @@ class ImageLoader implements platform.ImageLoader {
       chunkEvents,
       (bytes) async {
         final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-        return decode(buffer);
+        return decode(
+          buffer,
+          getTargetSize: (int intrinsicWidth, int intrinsicHeight) {
+            if (maxWidth == null && maxHeight == null) {
+              return ui.TargetImageSize(
+                width: intrinsicWidth,
+                height: intrinsicHeight,
+              );
+            }
+            return ui.TargetImageSize(
+              width: maxWidth,
+              height: maxHeight,
+            );
+          },
+        );
       },
       cacheManager,
       maxHeight,
@@ -204,7 +223,7 @@ class ImageLoader implements platform.ImageLoader {
   ) {
     final resolved = Uri.base.resolve(url);
     // ignore: undefined_function
-    return createImageCodecFromUrl(
+    return ui_web.createImageCodecFromUrl(
       resolved,
       chunkCallback: (int bytes, int total) {
         chunkEvents.add(

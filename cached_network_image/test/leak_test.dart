@@ -10,7 +10,9 @@ import 'dart:async';
 import 'dart:io' as io;
 import 'dart:ui' as ui;
 
-import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart'
+    hide DefaultCacheManager;
+import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart';
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart'
     hide ImageLoader;

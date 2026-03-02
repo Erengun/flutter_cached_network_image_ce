@@ -1,0 +1,488 @@
+import 'dart:async';
+
+import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:file/file.dart';
+import 'package:file/memory.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:hive_ce/hive.dart';
+// ignore: implementation_imports
+import 'package:hive_ce/src/hive_impl.dart';
+import 'package:http/http.dart' as http;
+
+import 'cache_entry_metadata.dart';
+
+export 'cache_entry_metadata.dart';
+
+const _kMetaBoxName = 'cached_network_image_cache';
+const _kDataBoxName = 'cached_network_image_data';
+const _kDefaultMaxAge = Duration(days: 30);
+const _kDefaultMaxCacheObjects = 200;
+const _kDefaultStalePeriod = Duration(days: 7);
+
+/// Web-specific [DefaultCacheManager] that stores both metadata and raw
+/// image bytes in Hive boxes (backed by IndexedDB on web).
+///
+/// Because there is no real file system on the web, cached "files" are
+/// materialised as in-memory [File] objects using [MemoryFileSystem].
+class DefaultCacheManager extends CacheManager with ImageCacheManager {
+  /// Creates a [DefaultCacheManager] for the web platform.
+  ///
+  /// [stalePeriod] controls how long a cached entry remains valid.
+  /// [maxNrOfCacheObjects] caps the number of entries before cleanup.
+  /// [httpClientFactory] allows injecting a custom HTTP client for testing.
+  /// [hiveInstance] allows injecting a pre-initialised Hive instance
+  /// (useful for VM tests that need `Hive.init(path)` called first).
+  DefaultCacheManager({
+    this.stalePeriod = _kDefaultStalePeriod,
+    this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
+    http.Client Function()? httpClientFactory,
+    @visibleForTesting HiveInterface? hiveInstance,
+  })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
+        _hive = hiveInstance ?? HiveImpl();
+
+  /// Duration before cached files are considered stale.
+  final Duration stalePeriod;
+
+  /// Maximum number of objects in the cache before cleanup.
+  final int maxNrOfCacheObjects;
+
+  /// Factory for creating HTTP clients.
+  final http.Client Function() _httpClientFactory;
+
+  /// In-memory file system used to materialise cached bytes as [File] objects.
+  final MemoryFileSystem _memFs = MemoryFileSystem();
+
+  /// Private Hive instance to avoid conflicts with the host app's Hive usage.
+  final HiveInterface _hive;
+
+  Box<Map>? _metaBox;
+  LazyBox<List<int>>? _dataBox;
+
+  /// Guards [_doInit] so concurrent callers share one init future.
+  Completer<void>? _initCompleter;
+
+  Future<void> _ensureInitialized() {
+    final currentCompleter = _initCompleter;
+    if (currentCompleter != null) return currentCompleter.future;
+
+    final completer = Completer<void>();
+    _initCompleter = completer;
+
+    _doInit().then((_) {
+      if (!completer.isCompleted) completer.complete();
+    }).catchError((Object e, StackTrace s) {
+      if (identical(_initCompleter, completer)) _initCompleter = null;
+      if (!completer.isCompleted) completer.completeError(e, s);
+    });
+
+    return completer.future;
+  }
+
+  Future<void> _doInit() async {
+    // On web, Hive uses IndexedDB — no path argument needed.
+    // We use a private HiveImpl instance to avoid conflicts with the
+    // host app's own Hive boxes.
+    _metaBox = await _hive.openBox<Map>(_kMetaBoxName);
+    _dataBox = await _hive.openLazyBox<List<int>>(_kDataBoxName);
+
+    // Run cleanup in background.
+    unawaited(_cleanupOldEntries());
+  }
+
+  /// Gets the file extension from a URL.
+  String _getFileExtensionFromUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final pathSegment =
+          uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
+      if (pathSegment.contains('.')) {
+        return pathSegment.split('.').last.toLowerCase();
+      }
+    } on Object catch (_) {
+      // Ignore parse errors
+    }
+    return 'file';
+  }
+
+  /// Materialises raw [bytes] as an in-memory [File].
+  File _bytesToFile(String key, List<int> bytes) {
+    final ext = _getFileExtensionFromUrl(key);
+    // Use a hash of the key for the filename to avoid invalid path characters
+    // (URLs contain colons and slashes that MemoryFileSystem interprets as dirs).
+    final hashedName = key.hashCode.toUnsigned(32).toRadixString(16);
+    final file = _memFs.file('/$hashedName.$ext');
+    file.writeAsBytesSync(bytes);
+    return file;
+  }
+
+  // ---------------------------------------------------------------
+  // BaseCacheManager
+  // ---------------------------------------------------------------
+
+  @override
+  Stream<FileResponse> getFileStream(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+  }) {
+    final controller = StreamController<FileResponse>();
+    _pushFileToStream(controller, url, key ?? url, headers, withProgress);
+    return controller.stream;
+  }
+
+  Future<void> _pushFileToStream(
+    StreamController<FileResponse> controller,
+    String url,
+    String key,
+    Map<String, String>? headers,
+    bool withProgress,
+  ) async {
+    await _ensureInitialized();
+
+    FileInfo? cachedFile;
+    try {
+      cachedFile = await getFileFromCache(key);
+      if (cachedFile != null) {
+        controller.add(cachedFile);
+        withProgress = false;
+      }
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Failed to load cached file for $url with error:\n$e',
+        CacheManagerLogLevel.debug,
+      );
+    }
+
+    if (cachedFile == null || cachedFile.validTill.isBefore(DateTime.now())) {
+      try {
+        await for (final response
+            in _downloadFile(url, key, headers, withProgress)) {
+          if (response is DownloadProgress && withProgress) {
+            controller.add(response);
+          }
+          if (response is FileInfo) {
+            controller.add(response);
+          }
+        }
+      } on Object catch (e) {
+        cacheLogger.log(
+          'CacheManager: Failed to download file from $url with error:\n$e',
+          CacheManagerLogLevel.debug,
+        );
+        if (cachedFile == null && controller.hasListener) {
+          controller.addError(e);
+        }
+        if (cachedFile != null &&
+            e is HttpExceptionWithStatus &&
+            e.statusCode == 404) {
+          if (controller.hasListener) {
+            controller.addError(e);
+          }
+          await removeFile(key);
+        }
+      }
+    }
+    await controller.close();
+  }
+
+  Stream<FileResponse> _downloadFile(
+    String url,
+    String key,
+    Map<String, String>? headers,
+    bool withProgress,
+  ) async* {
+    cacheLogger.log(
+      'CacheManager: Downloading $url',
+      CacheManagerLogLevel.verbose,
+    );
+
+    final request = http.Request('GET', Uri.parse(url));
+    if (headers != null) {
+      request.headers.addAll(headers);
+    }
+
+    final client = _httpClientFactory();
+    try {
+      final response = await client.send(request);
+
+      if (response.statusCode != 200 && response.statusCode != 202) {
+        throw HttpExceptionWithStatus(
+          response.statusCode,
+          'Invalid statusCode: ${response.statusCode}',
+          uri: Uri.parse(url),
+        );
+      }
+
+      final contentLength = response.contentLength;
+      final allBytes = <int>[];
+      var receivedBytes = 0;
+
+      await for (final chunk in response.stream) {
+        receivedBytes += chunk.length;
+        allBytes.addAll(chunk);
+        if (withProgress) {
+          yield DownloadProgress(url, contentLength, receivedBytes);
+        }
+      }
+
+      // Store metadata + data in Hive.
+      final validTill = DateTime.now().add(stalePeriod);
+      final cacheHeaders = response.headers;
+      final eTag = cacheHeaders['etag'];
+      final fileExtension = _getFileExtensionFromUrl(url);
+      final relativePath =
+          '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
+
+      await _metaBox!.put(
+        key,
+        CacheEntryMetadata(
+          url: url,
+          relativePath: relativePath,
+          validTill: validTill,
+          eTag: eTag,
+          length: receivedBytes,
+        ).toMap(),
+      );
+      await _dataBox!.put(key, allBytes);
+
+      final file = _bytesToFile(key, allBytes);
+      yield FileInfo(file, FileSource.Online, validTill, url);
+    } finally {
+      client.close();
+    }
+  }
+
+  @override
+  Future<FileInfo?> getFileFromCache(
+    String key, {
+    bool ignoreMemCache = false,
+  }) async {
+    await _ensureInitialized();
+
+    final raw = _metaBox!.get(key);
+    if (raw == null) return null;
+
+    final metadata = CacheEntryMetadata.fromMap(raw);
+
+    final bytes = await _dataBox!.get(key);
+    if (bytes == null) {
+      // Metadata exists but data is missing — clean up.
+      await _metaBox!.delete(key);
+      return null;
+    }
+
+    final file = _bytesToFile(key, bytes);
+    return FileInfo(
+      file,
+      FileSource.Cache,
+      metadata.validTill,
+      metadata.url,
+    );
+  }
+
+  @override
+  Future<File> putFile(
+    String url,
+    List<int> fileBytes, {
+    String? key,
+    String? eTag,
+    Duration maxAge = _kDefaultMaxAge,
+    String fileExtension = 'file',
+  }) async {
+    await _ensureInitialized();
+
+    key ??= url;
+    final relativePath =
+        '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
+    final validTill = DateTime.now().add(maxAge);
+
+    await _metaBox!.put(
+      key,
+      CacheEntryMetadata(
+        url: url,
+        relativePath: relativePath,
+        validTill: validTill,
+        eTag: eTag,
+        length: fileBytes.length,
+      ).toMap(),
+    );
+    await _dataBox!.put(key, fileBytes);
+
+    return _bytesToFile(key, fileBytes);
+  }
+
+  @override
+  Future<void> removeFile(String key) async {
+    await _ensureInitialized();
+    await _metaBox!.delete(key);
+    await _dataBox!.delete(key);
+  }
+
+  @override
+  Future<void> emptyCache() async {
+    await _ensureInitialized();
+    await _metaBox!.clear();
+    await _dataBox!.clear();
+  }
+
+  @override
+  Future<void> dispose() async {
+    final inFlightInit = _initCompleter;
+    if (inFlightInit != null) {
+      try {
+        await inFlightInit.future;
+      } on Object catch (_) {
+        // Ignore init errors during dispose.
+      }
+    }
+
+    if (_metaBox != null && _metaBox!.isOpen) {
+      await _metaBox!.close();
+    }
+    if (_dataBox != null && _dataBox!.isOpen) {
+      await _dataBox!.close();
+    }
+
+    _metaBox = null;
+    _dataBox = null;
+    _initCompleter = null;
+  }
+
+  /// Clean up entries that have expired.
+  Future<void> _cleanupOldEntries() async {
+    try {
+      final now = DateTime.now();
+      final entries = <MapEntry<dynamic, CacheEntryMetadata>>[];
+
+      for (final key in _metaBox!.keys.toList()) {
+        final raw = _metaBox!.get(key);
+        if (raw != null) {
+          entries.add(MapEntry(key, CacheEntryMetadata.fromMap(raw)));
+        }
+      }
+
+      // Remove expired entries.
+      for (final entry in entries) {
+        if (entry.value.validTill.isBefore(now)) {
+          await _metaBox!.delete(entry.key);
+          await _dataBox!.delete(entry.key);
+        }
+      }
+
+      // If cache is still too large, remove oldest entries.
+      if (_metaBox!.length > maxNrOfCacheObjects) {
+        final sortedEntries = entries
+            .where((e) => _metaBox!.containsKey(e.key))
+            .toList()
+          ..sort((a, b) => a.value.validTill.compareTo(b.value.validTill));
+
+        final toRemove = sortedEntries.length - maxNrOfCacheObjects;
+        for (var i = 0; i < toRemove; i++) {
+          final entry = sortedEntries[i];
+          await _metaBox!.delete(entry.key);
+          await _dataBox!.delete(entry.key);
+        }
+      }
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error during cleanup: $e',
+        CacheManagerLogLevel.warning,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // ImageCacheManager
+  // ---------------------------------------------------------------
+
+  final Map<String, Stream<FileResponse>> _runningResizes = {};
+
+  @override
+  Stream<FileResponse> getImageFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+    int? maxHeight,
+    int? maxWidth,
+  }) async* {
+    // On web, we don't support disk-based image resizing.
+    // Just forward to getFileStream.
+    if (maxHeight == null && maxWidth == null) {
+      yield* getFileStream(
+        url,
+        key: key,
+        headers: headers,
+        withProgress: withProgress,
+      );
+      return;
+    }
+
+    key ??= url;
+    var resizedKey = 'resized';
+    if (maxWidth != null) resizedKey += '_w$maxWidth';
+    if (maxHeight != null) resizedKey += '_h$maxHeight';
+    resizedKey += '_$key';
+
+    final fromCache = await getFileFromCache(resizedKey);
+    if (fromCache != null) {
+      yield fromCache;
+      if (fromCache.validTill.isAfter(DateTime.now())) {
+        return;
+      }
+      withProgress = false;
+    }
+
+    // On web we can't resize images on disk, so we store the original
+    // under the resized key so that the cache-key system still works.
+    var runningResize = _runningResizes[resizedKey];
+    if (runningResize == null) {
+      runningResize = _fetchAndStoreAsResized(
+        url,
+        key,
+        resizedKey,
+        headers,
+        withProgress,
+      ).asBroadcastStream();
+      _runningResizes[resizedKey] = runningResize;
+    }
+    yield* runningResize;
+    _runningResizes.remove(resizedKey);
+  }
+
+  Stream<FileResponse> _fetchAndStoreAsResized(
+    String url,
+    String originalKey,
+    String resizedKey,
+    Map<String, String>? headers,
+    bool withProgress,
+  ) async* {
+    await for (final response in getFileStream(
+      url,
+      key: originalKey,
+      headers: headers,
+      withProgress: withProgress,
+    )) {
+      if (response is DownloadProgress) {
+        yield response;
+      }
+      if (response is FileInfo) {
+        // Store the original bytes under the resized key.
+        final bytes = await response.file.readAsBytes();
+        final file = await putFile(
+          url,
+          bytes,
+          key: resizedKey,
+          maxAge: response.validTill.difference(DateTime.now()),
+        );
+        yield FileInfo(
+          file,
+          response.source,
+          response.validTill,
+          response.originalUrl,
+        );
+      }
+    }
+  }
+}

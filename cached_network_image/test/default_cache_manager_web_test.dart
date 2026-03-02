@@ -420,7 +420,7 @@ void main() {
 
       // Should have two FileInfo events: one from cache, one from download
       final fileInfos = events2.whereType<FileInfo>().toList();
-      expect(fileInfos.length, greaterThanOrEqualTo(1));
+      expect(fileInfos.length, equals(2));
 
       await manager.emptyCache();
       await manager.dispose();

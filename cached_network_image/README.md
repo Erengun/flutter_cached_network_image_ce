@@ -52,11 +52,10 @@ We benchmarked the cache metadata operations (checking, writing, and deleting ca
 
 ## 📦 Installation
 
-Add `cached_network_image_ce` to your `pubspec.yaml`:
+Run the following command:
 
-```yaml
-dependencies:
-  cached_network_image_ce: ^4.0.1
+```sh
+flutter pub add cached_network_image_ce
 ```
 
 ## 💻 How to use

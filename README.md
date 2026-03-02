@@ -50,7 +50,7 @@ We benchmarked the cache metadata operations (checking, writing, and deleting ca
 * **Drop-in Replacement:** 99% API compatible with the original package.
 * **High Performance:** Powered by `hive_ce` for instant cache lookups.
 * **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
-* **Web Support:** Minimal support for web (currently works like standard `Image.network`).
+* **True Web Support:** Unlike the original package, CE provides **full, persistent image caching** on the Web via IndexedDB (`hive_ce`), completely avoiding RAM freezes by using native image decoding sizes.
 
 ## 📦 Installation
 
@@ -128,9 +128,13 @@ A: Yes. Because we switched the storage engine from SQLite to Hive, the old cach
 **Q: My app crashes/pauses on errors?**
 A: In Debug mode, Flutter may pause on exceptions even if they are caught. This is expected behavior for network errors (404s). In Release mode, these are handled silently by the `errorWidget`.
 
+**Q: Why is web caching slower or using Hive for image bytes?**
+A: On Mobile & Desktop (IO), this package stores image bytes directly on the incredibly fast native file system, and uses Hive *only* for metadata. The Web platform, however, lacks a native file system. Therefore, for web we use `hive_ce` to store both metadata and the actual image bytes in IndexedDB. Serializing large byte arrays in and out of IndexedDB introduces overhead that isn't present on IO. 
+*Alternative:* If persistent caching across sessions isn't critical for your web users, consider conditionally using the standard `Image.network` on the web, which relies on the browser's built-in memory/HTTP caching to achieve faster decoding.
+
 ## 🤝 Contributing
 
-We welcome contributions! If you want to help maintain this essential package, please check the [CONTRIBUTING.md](https://www.google.com/search?q=CONTRIBUTING.md).
+We welcome contributions! If you want to help maintain this essential package, please check the [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 📄 License
 

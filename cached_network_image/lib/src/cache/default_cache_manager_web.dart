@@ -105,12 +105,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }
 
   /// Materialises raw [bytes] as an in-memory [File].
-  File _bytesToFile(String key, List<int> bytes) {
-    final ext = _getFileExtensionFromUrl(key);
-    // Use a hash of the key for the filename to avoid invalid path characters
-    // (URLs contain colons and slashes that MemoryFileSystem interprets as dirs).
-    final hashedName = key.hashCode.toUnsigned(32).toRadixString(16);
-    final file = _memFs.file('/$hashedName.$ext');
+  File _bytesToFile(String relativePath, List<int> bytes) {
+    final file = _memFs.file('/$relativePath');
     file.writeAsBytesSync(bytes);
     return file;
   }
@@ -254,7 +250,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       );
       await _dataBox!.put(key, allBytes);
 
-      final file = _bytesToFile(key, allBytes);
+      final file = _bytesToFile(relativePath, allBytes);
       yield FileInfo(file, FileSource.Online, validTill, url);
     } finally {
       client.close();
@@ -280,7 +276,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       return null;
     }
 
-    final file = _bytesToFile(key, bytes);
+    final file = _bytesToFile(metadata.relativePath, bytes);
     return FileInfo(
       file,
       FileSource.Cache,
@@ -317,7 +313,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
     await _dataBox!.put(key, fileBytes);
 
-    return _bytesToFile(key, fileBytes);
+    return _bytesToFile(relativePath, fileBytes);
   }
 
   @override
@@ -404,6 +400,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         if (entry.value.validTill.isBefore(now)) {
           await _metaBox!.delete(entry.key);
           await _dataBox!.delete(entry.key);
+          try {
+            final file = _memFs.file('/${entry.value.relativePath}');
+            if (file.existsSync()) {
+              await file.delete();
+            }
+          } on Object catch (_) {}
         }
       }
 
@@ -419,6 +421,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           final entry = sortedEntries[i];
           await _metaBox!.delete(entry.key);
           await _dataBox!.delete(entry.key);
+          try {
+            final file = _memFs.file('/${entry.value.relativePath}');
+            if (file.existsSync()) {
+              await file.delete();
+            }
+          } on Object catch (_) {}
         }
       }
     } on Object catch (e) {
@@ -487,7 +495,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     try {
       yield* runningResize;
     } finally {
-      _runningResizes.remove(resizedKey);
+      if (_runningResizes[resizedKey] == runningResize) {
+        _runningResizes.remove(resizedKey);
+      }
     }
   }
 

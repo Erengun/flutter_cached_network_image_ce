@@ -25,8 +25,6 @@ const _kDefaultStalePeriod = Duration(days: 7);
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico'];
 
-
-
 /// Signature for a function that returns the cache base directory.
 ///
 /// Defaults to [getTemporaryDirectory] when not specified.

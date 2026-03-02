@@ -138,7 +138,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     Map<String, String>? headers,
     bool withProgress,
   ) async {
-    await _ensureInitialized();
+    try {
+      await _ensureInitialized();
+    } on Object catch (e, stackTrace) {
+      if (controller.hasListener) {
+        controller.addError(e, stackTrace);
+      }
+      await controller.close();
+      return;
+    }
 
     FileInfo? cachedFile;
     try {

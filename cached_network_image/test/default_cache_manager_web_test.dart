@@ -730,8 +730,20 @@ void main() {
           DefaultCacheManager(hiveInstance: testHive, maxNrOfCacheObjects: 3);
 
       // The newest 3 entries should survive, oldest 2 may be cleaned up
-      // (cleanup runs in background on init, we need to wait a moment)
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // (cleanup runs in background on init, wait until it finishes via polling)
+      bool cleanupSuccess = false;
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        final oldest = await manager2.getFileFromCache(
+          'https://example.com/cleanup-0.png',
+        );
+        if (oldest == null) {
+          cleanupSuccess = true;
+          break;
+        }
+      }
+
+      expect(cleanupSuccess, isTrue, reason: 'Background cleanup failed or timed out');
 
       // At minimum, the newest entries should be available
       final newest = await manager2.getFileFromCache(

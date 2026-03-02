@@ -743,7 +743,8 @@ void main() {
         }
       }
 
-      expect(cleanupSuccess, isTrue, reason: 'Background cleanup failed or timed out');
+      expect(cleanupSuccess, isTrue,
+          reason: 'Background cleanup failed or timed out');
 
       // At minimum, the newest entries should be available
       final newest = await manager2.getFileFromCache(

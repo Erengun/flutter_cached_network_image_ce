@@ -358,7 +358,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           CacheManagerLogLevel.warning,
         );
       }
-        }
+    }
     await _metaBox!.clear();
     await _dataBox!.clear();
   }

@@ -353,12 +353,10 @@ void main() {
         ),
       );
 
-      await manager
-          .getFileStream(
-            'https://example.com/headers.png',
-            headers: {'Authorization': 'Bearer token123'},
-          )
-          .toList();
+      await manager.getFileStream(
+        'https://example.com/headers.png',
+        headers: {'Authorization': 'Bearer token123'},
+      ).toList();
 
       expect(receivedHeaders, isNotNull);
       expect(receivedHeaders!['Authorization'], 'Bearer token123');
@@ -409,18 +407,15 @@ void main() {
       );
 
       // First request — download
-      await manager
-          .getFileStream('https://example.com/stale.png')
-          .toList();
+      await manager.getFileStream('https://example.com/stale.png').toList();
       expect(downloadCount, 1);
 
       // Wait a tiny bit to ensure stalePeriod (zero) has passed
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       // Second request — should serve stale cache AND redownload
-      final events2 = await manager
-          .getFileStream('https://example.com/stale.png')
-          .toList();
+      final events2 =
+          await manager.getFileStream('https://example.com/stale.png').toList();
       expect(downloadCount, 2);
 
       // Should have two FileInfo events: one from cache, one from download
@@ -445,9 +440,8 @@ void main() {
         ),
       );
 
-      final events = await manager
-          .getImageFile('https://example.com/image.png')
-          .toList();
+      final events =
+          await manager.getImageFile('https://example.com/image.png').toList();
 
       final fileInfos = events.whereType<FileInfo>().toList();
       expect(fileInfos, hasLength(1));
@@ -732,7 +726,8 @@ void main() {
 
       // Trigger cleanup by disposing and re-creating
       await manager.dispose();
-      final manager2 = DefaultCacheManager(hiveInstance: testHive, maxNrOfCacheObjects: 3);
+      final manager2 =
+          DefaultCacheManager(hiveInstance: testHive, maxNrOfCacheObjects: 3);
 
       // The newest 3 entries should survive, oldest 2 may be cleaned up
       // (cleanup runs in background on init, we need to wait a moment)
@@ -748,8 +743,6 @@ void main() {
       await manager2.dispose();
     });
   });
-
-
 
   // =====================================================================
   // StreamController / http.Client lifecycle (leak checks)

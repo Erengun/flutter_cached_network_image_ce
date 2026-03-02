@@ -323,6 +323,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @override
   Future<void> removeFile(String key) async {
     await _ensureInitialized();
+    final raw = _metaBox!.get(key);
+    if (raw != null) {
+      final metadata = CacheEntryMetadata.fromMap(raw);
+      try {
+        final file = _memFs.file('/${metadata.relativePath}');
+        if (file.existsSync()) {
+          await file.delete();
+        }
+      } on Object catch (e) {
+        cacheLogger.log(
+          'CacheManager: Error deleting materialized file for $key: $e',
+          CacheManagerLogLevel.warning,
+        );
+      }
+    }
     await _metaBox!.delete(key);
     await _dataBox!.delete(key);
   }
@@ -330,6 +345,20 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @override
   Future<void> emptyCache() async {
     await _ensureInitialized();
+    for (final raw in _metaBox!.values) {
+      final metadata = CacheEntryMetadata.fromMap(raw);
+      try {
+        final file = _memFs.file('/${metadata.relativePath}');
+        if (file.existsSync()) {
+          await file.delete();
+        }
+      } on Object catch (e) {
+        cacheLogger.log(
+          'CacheManager: Error deleting materialized file during emptyCache: $e',
+          CacheManagerLogLevel.warning,
+        );
+      }
+        }
     await _metaBox!.clear();
     await _dataBox!.clear();
   }
@@ -455,8 +484,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       ).asBroadcastStream();
       _runningResizes[resizedKey] = runningResize;
     }
-    yield* runningResize;
-    _runningResizes.remove(resizedKey);
+    try {
+      yield* runningResize;
+    } finally {
+      _runningResizes.remove(resizedKey);
+    }
   }
 
   Stream<FileResponse> _fetchAndStoreAsResized(

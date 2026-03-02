@@ -1,3 +1,11 @@
+## [4.5.0] - 2026-03-02
+
+* **Feature:** Added web platform support. The package can now be used in Flutter web apps.
+  * Web caching uses Hive CE backed by IndexedDB — no new dependencies needed.
+  * Image bytes and metadata are stored in Hive boxes on web instead of the file system.
+  * Disk-based image resizing is skipped on web (originals are cached as-is).
+  * The `DefaultCacheManager` is now conditionally imported per platform (IO/web).
+
 ## [4.4.0] - 2026-02-27
 
 * **Feature:** Skip placeholder and fade animations when images are loaded from disk cache. Cached images now appear instantly without unnecessary visual flicker.

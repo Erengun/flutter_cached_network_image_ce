@@ -35,6 +35,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
+    this.connectionParameters,
     http.Client Function()? httpClientFactory,
     @visibleForTesting HiveInterface? hiveInstance,
   })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
@@ -45,6 +46,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Maximum number of objects in the cache before cleanup.
   final int maxNrOfCacheObjects;
+
+  /// Optional connection parameters for HTTP timeouts.
+  ///
+  /// When `null` (the default), no timeouts are applied and downloads may
+  /// wait indefinitely — preserving the existing behaviour.
+  ///
+  /// **Note:** On the web platform, timeouts only apply when using
+  /// [ImageRenderMethodForWeb.HttpGet]. The [ImageRenderMethodForWeb.HtmlImage]
+  /// render path bypasses the cache manager's HTTP layer entirely and is
+  /// handled by the browser.
+  final ConnectionParameters? connectionParameters;
 
   /// Factory for creating HTTP clients.
   final http.Client Function() _httpClientFactory;
@@ -208,7 +220,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     final client = _httpClientFactory();
     try {
-      final response = await client.send(request);
+      final connectionTimeout = connectionParameters?.connectionTimeout;
+      final response = connectionTimeout != null
+          ? await client.send(request).timeout(connectionTimeout)
+          : await client.send(request);
 
       if (response.statusCode != 200 && response.statusCode != 202) {
         throw HttpExceptionWithStatus(
@@ -222,7 +237,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final allBytes = <int>[];
       var receivedBytes = 0;
 
-      await for (final chunk in response.stream) {
+      final requestTimeout = connectionParameters?.requestTimeout;
+      final stream = requestTimeout != null
+          ? response.stream.timeout(requestTimeout)
+          : response.stream;
+
+      await for (final chunk in stream) {
         receivedBytes += chunk.length;
         allBytes.addAll(chunk);
         if (withProgress) {

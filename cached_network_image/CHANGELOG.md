@@ -1,3 +1,11 @@
+## [4.6.0] - 2026-03-03
+
+* **Feature:** Added optional HTTP timeout support via `ConnectionParameters` on `DefaultCacheManager`.
+  * `connectionTimeout` limits time waiting for response headers.
+  * `requestTimeout` applies an inactivity timeout while streaming response bytes.
+  * Existing behavior is preserved when `connectionParameters` is not provided.
+* Added tests for timeout behavior and client cleanup on timeout.
+
 ## [4.5.0] - 2026-03-02
 
 * **Feature:** Added web platform support. The package can now be used in Flutter web apps.

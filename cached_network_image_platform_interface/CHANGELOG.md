@@ -1,3 +1,9 @@
+## [5.2.0] - 2026-03-03
+
+* **Feature:** Added `ConnectionParameters` configuration class.
+	* Includes optional `connectionTimeout` and `requestTimeout` fields.
+	* Enables cache managers to apply HTTP timeout behavior while preserving current behavior when omitted.
+
 ## [5.1.0] - 2026-02-23
 
 * **Feature:** Added `UnsupportedImageFormatException` for non-codec-decodable formats (e.g., SVG)

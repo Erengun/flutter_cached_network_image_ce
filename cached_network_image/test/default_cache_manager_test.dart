@@ -1330,4 +1330,168 @@ void main() {
       expect(reconstructed.length, original.length);
     });
   });
+
+  // ---- ConnectionParameters / timeout tests ----
+
+  group('DefaultCacheManager with ConnectionParameters', () {
+    late DefaultCacheManager manager;
+
+    tearDown(() async {
+      try {
+        await manager.emptyCache();
+        await manager.dispose();
+      } on Object catch (_) {}
+    });
+
+    test('connectionParameters defaults to null', () {
+      manager = DefaultCacheManager();
+      expect(manager.connectionParameters, isNull);
+    });
+
+    test('accepts connectionParameters', () {
+      manager = DefaultCacheManager(
+        connectionParameters: const ConnectionParameters(
+          connectionTimeout: Duration(seconds: 10),
+          requestTimeout: Duration(seconds: 30),
+        ),
+      );
+      expect(manager.connectionParameters, isNotNull);
+      expect(
+        manager.connectionParameters!.connectionTimeout,
+        const Duration(seconds: 10),
+      );
+      expect(
+        manager.connectionParameters!.requestTimeout,
+        const Duration(seconds: 30),
+      );
+    });
+
+    test('connectionTimeout triggers TimeoutException when server is slow',
+        () async {
+      manager = DefaultCacheManager(
+        connectionParameters: const ConnectionParameters(
+          connectionTimeout: Duration(milliseconds: 100),
+        ),
+        httpClientFactory: () => http_testing.MockClient.streaming(
+          (request, bodyStream) async {
+            // Simulate a server that never responds.
+            await Future<void>.delayed(const Duration(seconds: 10));
+            return http.StreamedResponse(const Stream.empty(), 200);
+          },
+        ),
+      );
+
+      final stream =
+          manager.getFileStream('https://example.com/slow-connect.png');
+      await expectLater(stream, emitsError(isA<TimeoutException>()));
+    });
+
+    test('requestTimeout triggers TimeoutException when stream stalls',
+        () async {
+      manager = DefaultCacheManager(
+        connectionParameters: const ConnectionParameters(
+          requestTimeout: Duration(milliseconds: 100),
+        ),
+        httpClientFactory: () => http_testing.MockClient.streaming(
+          (request, bodyStream) async {
+            final controller = StreamController<List<int>>();
+            // Send one chunk then stall indefinitely.
+            controller.add([1, 2, 3, 4]);
+            // Never close the controller — simulates a stalled transfer.
+            return http.StreamedResponse(
+              controller.stream,
+              200,
+              contentLength: 100,
+            );
+          },
+        ),
+      );
+
+      final stream =
+          manager.getFileStream('https://example.com/stalled.png');
+      await expectLater(stream, emitsError(isA<TimeoutException>()));
+    });
+
+    test('no timeout when connectionParameters is null', () async {
+      manager = DefaultCacheManager(
+        httpClientFactory: () => http_testing.MockClient(
+          (request) async => http.Response('data', 200),
+        ),
+      );
+
+      final events = await manager
+          .getFileStream('https://example.com/no-timeout.dat')
+          .toList();
+      final fileInfos = events.whereType<FileInfo>().toList();
+      expect(fileInfos, isNotEmpty);
+    });
+
+    test('successful download with connectionParameters set', () async {
+      manager = DefaultCacheManager(
+        connectionParameters: const ConnectionParameters(
+          connectionTimeout: Duration(seconds: 5),
+          requestTimeout: Duration(seconds: 5),
+        ),
+        httpClientFactory: () => http_testing.MockClient(
+          (request) async => http.Response('image-data', 200),
+        ),
+      );
+
+      final events = await manager
+          .getFileStream('https://example.com/fast.png')
+          .toList();
+      final fileInfos = events.whereType<FileInfo>().toList();
+      expect(fileInfos, isNotEmpty);
+      expect(fileInfos.first.source.name, 'Online');
+    });
+
+    test('client is closed even when connectionTimeout fires', () async {
+      var clientClosed = false;
+
+      manager = DefaultCacheManager(
+        connectionParameters: const ConnectionParameters(
+          connectionTimeout: Duration(milliseconds: 50),
+        ),
+        httpClientFactory: () {
+          final inner = http_testing.MockClient.streaming(
+            (request, bodyStream) async {
+              await Future<void>.delayed(const Duration(seconds: 10));
+              return http.StreamedResponse(const Stream.empty(), 200);
+            },
+          );
+          return _TimeoutCloseTrackingClient(inner, onClose: () {
+            clientClosed = true;
+          });
+        },
+      );
+
+      try {
+        await manager
+            .getFileStream('https://example.com/close-test.png')
+            .toList();
+      } on Object catch (_) {}
+
+      expect(clientClosed, isTrue,
+          reason: 'http.Client must be closed even on timeout');
+    });
+  });
+}
+
+/// A wrapper around [http.Client] that tracks whether [close] was called.
+class _TimeoutCloseTrackingClient extends http.BaseClient {
+  _TimeoutCloseTrackingClient(this._inner, {required this.onClose});
+
+  final http.Client _inner;
+  final void Function() onClose;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    return _inner.send(request);
+  }
+
+  @override
+  void close() {
+    onClose();
+    _inner.close();
+  }
 }

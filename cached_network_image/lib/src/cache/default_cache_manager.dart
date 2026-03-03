@@ -255,8 +255,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final fileExtension = _getFileExtensionFromUrl(url);
       final relativePath = _generateRelativePath(key, fileExtension);
       final filePath = _cacheFilePath(relativePath);
-      final file = io.File(filePath);
-      final sink = file.openWrite();
+      final tempFilePath = '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
+      final tempFile = io.File(tempFilePath);
+      final sink = tempFile.openWrite();
 
       final requestTimeout = connectionParameters?.requestTimeout;
       final stream = requestTimeout != null
@@ -264,6 +265,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           : response.stream;
 
       var receivedBytes = 0;
+      var movedToFinalPath = false;
       try {
         await for (final chunk in stream) {
           receivedBytes += chunk.length;
@@ -274,9 +276,20 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
         await sink.flush();
         await sink.close();
+
+        final finalFile = io.File(filePath);
+        if (await finalFile.exists()) {
+          await finalFile.delete();
+        }
+        await tempFile.rename(filePath);
+        movedToFinalPath = true;
       } on Object catch (_) {
         await sink.close();
         rethrow;
+      } finally {
+        if (!movedToFinalPath && await tempFile.exists()) {
+          await tempFile.delete();
+        }
       }
 
       // Store metadata in Hive

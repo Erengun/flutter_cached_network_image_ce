@@ -1350,9 +1350,9 @@ void main() {
 
     test('accepts connectionParameters', () {
       manager = DefaultCacheManager(
-        connectionParameters: const ConnectionParameters(
-          connectionTimeout: Duration(seconds: 10),
-          requestTimeout: Duration(seconds: 30),
+        connectionParameters: ConnectionParameters(
+          connectionTimeout: const Duration(seconds: 10),
+          requestTimeout: const Duration(seconds: 30),
         ),
       );
       expect(manager.connectionParameters, isNotNull);
@@ -1369,8 +1369,8 @@ void main() {
     test('connectionTimeout triggers TimeoutException when server is slow',
         () async {
       manager = DefaultCacheManager(
-        connectionParameters: const ConnectionParameters(
-          connectionTimeout: Duration(milliseconds: 100),
+        connectionParameters: ConnectionParameters(
+          connectionTimeout: const Duration(milliseconds: 100),
         ),
         httpClientFactory: () => http_testing.MockClient.streaming(
           (request, bodyStream) async {
@@ -1389,8 +1389,8 @@ void main() {
     test('requestTimeout triggers TimeoutException when stream stalls',
         () async {
       manager = DefaultCacheManager(
-        connectionParameters: const ConnectionParameters(
-          requestTimeout: Duration(milliseconds: 100),
+        connectionParameters: ConnectionParameters(
+          requestTimeout: const Duration(milliseconds: 100),
         ),
         httpClientFactory: () => http_testing.MockClient.streaming(
           (request, bodyStream) async {
@@ -1427,9 +1427,9 @@ void main() {
 
     test('successful download with connectionParameters set', () async {
       manager = DefaultCacheManager(
-        connectionParameters: const ConnectionParameters(
-          connectionTimeout: Duration(seconds: 5),
-          requestTimeout: Duration(seconds: 5),
+        connectionParameters: ConnectionParameters(
+          connectionTimeout: const Duration(seconds: 5),
+          requestTimeout: const Duration(seconds: 5),
         ),
         httpClientFactory: () => http_testing.MockClient(
           (request) async => http.Response('image-data', 200),
@@ -1447,8 +1447,8 @@ void main() {
       var clientClosed = false;
 
       manager = DefaultCacheManager(
-        connectionParameters: const ConnectionParameters(
-          connectionTimeout: Duration(milliseconds: 50),
+        connectionParameters: ConnectionParameters(
+          connectionTimeout: const Duration(milliseconds: 50),
         ),
         httpClientFactory: () {
           final inner = http_testing.MockClient.streaming(

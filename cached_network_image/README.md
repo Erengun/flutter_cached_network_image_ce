@@ -119,16 +119,16 @@ You can configure network timeouts at the cache manager level using
 
 ```dart
 final cacheManager = DefaultCacheManager(
-  connectionParameters: const ConnectionParameters(
-    connectionTimeout: Duration(seconds: 10),
-    requestTimeout: Duration(seconds: 30),
+  connectionParameters: ConnectionParameters(
+    connectionTimeout: const Duration(seconds: 10),
+    requestTimeout: const Duration(seconds: 30),
   ),
 );
 
 CachedNetworkImage(
   imageUrl: 'https://example.com/image.jpg',
   cacheManager: cacheManager,
-  errorWidget: (context, url, error) => const Icon(Icons.error),
+  errorBuilder: (context, url, error) => const Icon(Icons.error),
 )
 ```
 

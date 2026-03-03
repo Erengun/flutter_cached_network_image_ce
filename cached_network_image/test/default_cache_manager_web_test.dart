@@ -931,8 +931,7 @@ void main() {
         ),
       );
 
-      final stream =
-          manager.getFileStream('https://example.com/stalled.png');
+      final stream = manager.getFileStream('https://example.com/stalled.png');
       await expectLater(stream, emitsError(isA<TimeoutException>()));
     });
 
@@ -963,9 +962,8 @@ void main() {
         ),
       );
 
-      final events = await manager
-          .getFileStream('https://example.com/fast.png')
-          .toList();
+      final events =
+          await manager.getFileStream('https://example.com/fast.png').toList();
       final fileInfos = events.whereType<FileInfo>().toList();
       expect(fileInfos, isNotEmpty);
       expect(fileInfos.first.source.name, 'Online');

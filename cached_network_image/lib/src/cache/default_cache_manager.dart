@@ -279,11 +279,34 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         await sink.close();
 
         final finalFile = io.File(filePath);
-        if (await finalFile.exists()) {
-          await finalFile.delete();
+        try {
+          await tempFile.rename(filePath);
+          movedToFinalPath = true;
+        } on Object catch (_) {
+          io.File? backupFile;
+          try {
+            if (await finalFile.exists()) {
+              final backupPath =
+                  '$filePath.${DateTime.now().microsecondsSinceEpoch}.bak';
+              backupFile = await finalFile.rename(backupPath);
+            }
+
+            await tempFile.rename(filePath);
+            movedToFinalPath = true;
+
+            if (backupFile != null && await backupFile.exists()) {
+              await backupFile.delete();
+            }
+          } on Object catch (_) {
+            if (backupFile != null && await backupFile.exists()) {
+              if (await finalFile.exists()) {
+                await finalFile.delete();
+              }
+              await backupFile.rename(filePath);
+            }
+            rethrow;
+          }
         }
-        await tempFile.rename(filePath);
-        movedToFinalPath = true;
       } on Object catch (_) {
         await sink.close();
         rethrow;

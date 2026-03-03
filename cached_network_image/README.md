@@ -112,6 +112,38 @@ CachedNetworkImage(
 Image(image: CachedNetworkImageProvider(url))
 ```
 
+### Network Timeouts (DefaultCacheManager)
+
+You can configure network timeouts at the cache manager level using
+`ConnectionParameters`.
+
+```dart
+final cacheManager = DefaultCacheManager(
+  connectionParameters: const ConnectionParameters(
+    connectionTimeout: Duration(seconds: 10),
+    requestTimeout: Duration(seconds: 30),
+  ),
+);
+
+CachedNetworkImage(
+  imageUrl: 'https://example.com/image.jpg',
+  cacheManager: cacheManager,
+  errorWidget: (context, url, error) => const Icon(Icons.error),
+)
+```
+
+Timeout behavior:
+
+* `connectionTimeout`: max time waiting for response headers.
+* `requestTimeout`: inactivity timeout while streaming response bytes.
+
+Both fields are optional and nullable. If `connectionParameters` is not
+provided, existing behavior is preserved (no timeout is applied).
+
+On Flutter Web, timeout settings apply when using
+`ImageRenderMethodForWeb.HttpGet`. The `HtmlImage` render method uses the
+browser image pipeline and bypasses the cache manager HTTP path.
+
 ### SVG Support
 
 Flutter's built-in image codec doesn't support SVG. When `CachedNetworkImage`

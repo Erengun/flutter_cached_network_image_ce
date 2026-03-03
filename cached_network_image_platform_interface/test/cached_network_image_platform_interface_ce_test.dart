@@ -254,48 +254,66 @@ void main() {
 
   group('ConnectionParameters', () {
     test('can be created with no arguments', () {
-      const cp = ConnectionParameters();
+      final cp = ConnectionParameters();
       expect(cp.connectionTimeout, isNull);
       expect(cp.requestTimeout, isNull);
     });
 
     test('stores connectionTimeout', () {
-      const cp = ConnectionParameters(
-        connectionTimeout: Duration(seconds: 10),
+      final cp = ConnectionParameters(
+        connectionTimeout: const Duration(seconds: 10),
       );
       expect(cp.connectionTimeout, const Duration(seconds: 10));
       expect(cp.requestTimeout, isNull);
     });
 
     test('stores requestTimeout', () {
-      const cp = ConnectionParameters(
-        requestTimeout: Duration(seconds: 30),
+      final cp = ConnectionParameters(
+        requestTimeout: const Duration(seconds: 30),
       );
       expect(cp.connectionTimeout, isNull);
       expect(cp.requestTimeout, const Duration(seconds: 30));
     });
 
     test('stores both timeouts', () {
-      const cp = ConnectionParameters(
-        connectionTimeout: Duration(seconds: 5),
-        requestTimeout: Duration(seconds: 15),
+      final cp = ConnectionParameters(
+        connectionTimeout: const Duration(seconds: 5),
+        requestTimeout: const Duration(seconds: 15),
       );
       expect(cp.connectionTimeout, const Duration(seconds: 5));
       expect(cp.requestTimeout, const Duration(seconds: 15));
     });
 
+    test('throws when connectionTimeout is negative', () {
+      expect(
+        () => ConnectionParameters(
+          connectionTimeout: const Duration(seconds: -1),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('throws when requestTimeout is negative', () {
+      expect(
+        () => ConnectionParameters(
+          requestTimeout: const Duration(seconds: -1),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
     test('equality works', () {
-      const a = ConnectionParameters(
-        connectionTimeout: Duration(seconds: 10),
-        requestTimeout: Duration(seconds: 30),
+      final a = ConnectionParameters(
+        connectionTimeout: const Duration(seconds: 10),
+        requestTimeout: const Duration(seconds: 30),
       );
-      const b = ConnectionParameters(
-        connectionTimeout: Duration(seconds: 10),
-        requestTimeout: Duration(seconds: 30),
+      final b = ConnectionParameters(
+        connectionTimeout: const Duration(seconds: 10),
+        requestTimeout: const Duration(seconds: 30),
       );
-      const c = ConnectionParameters(
-        connectionTimeout: Duration(seconds: 5),
-        requestTimeout: Duration(seconds: 30),
+      final c = ConnectionParameters(
+        connectionTimeout: const Duration(seconds: 5),
+        requestTimeout: const Duration(seconds: 30),
       );
       expect(a, equals(b));
       expect(a.hashCode, b.hashCode);
@@ -303,9 +321,9 @@ void main() {
     });
 
     test('toString is informative', () {
-      const cp = ConnectionParameters(
-        connectionTimeout: Duration(seconds: 10),
-        requestTimeout: Duration(seconds: 30),
+      final cp = ConnectionParameters(
+        connectionTimeout: const Duration(seconds: 10),
+        requestTimeout: const Duration(seconds: 30),
       );
       expect(cp.toString(), contains('connectionTimeout'));
       expect(cp.toString(), contains('requestTimeout'));

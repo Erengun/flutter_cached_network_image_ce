@@ -29,10 +29,25 @@ class ConnectionParameters {
   /// does **not** cap the total download duration. A slow-but-progressing
   /// download will never be interrupted. A [TimeoutException] is thrown if no
   /// data arrives within the specified duration.
-  const ConnectionParameters({
+  ConnectionParameters({
     this.connectionTimeout,
     this.requestTimeout,
-  });
+  }) {
+    if (connectionTimeout != null && connectionTimeout!.isNegative) {
+      throw ArgumentError.value(
+        connectionTimeout,
+        'connectionTimeout',
+        'Must be greater than or equal to zero.',
+      );
+    }
+    if (requestTimeout != null && requestTimeout!.isNegative) {
+      throw ArgumentError.value(
+        requestTimeout,
+        'requestTimeout',
+        'Must be greater than or equal to zero.',
+      );
+    }
+  }
 
   /// Maximum duration to wait for the server to respond with headers.
   ///

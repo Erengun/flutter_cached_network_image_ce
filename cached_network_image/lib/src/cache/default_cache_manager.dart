@@ -255,7 +255,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final fileExtension = _getFileExtensionFromUrl(url);
       final relativePath = _generateRelativePath(key, fileExtension);
       final filePath = _cacheFilePath(relativePath);
-      final tempFilePath = '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
+      final tempFilePath =
+          '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
       final tempFile = io.File(tempFilePath);
       final sink = tempFile.openWrite();
 

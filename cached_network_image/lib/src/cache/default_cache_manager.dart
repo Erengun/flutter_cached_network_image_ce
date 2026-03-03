@@ -45,6 +45,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
+    this.connectionParameters,
     http.Client Function()? httpClientFactory,
     CacheDirectoryProvider? cacheDirectoryProvider,
   })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
@@ -56,6 +57,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Maximum number of objects in the cache before cleanup.
   final int maxNrOfCacheObjects;
+
+  /// Optional connection parameters for HTTP timeouts.
+  ///
+  /// When `null` (the default), no timeouts are applied and downloads may
+  /// wait indefinitely — preserving the existing behaviour.
+  final ConnectionParameters? connectionParameters;
 
   /// Factory for creating HTTP clients (injectable for testing).
   final http.Client Function() _httpClientFactory;
@@ -231,7 +238,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     final client = _httpClientFactory();
     try {
-      final response = await client.send(request);
+      final connectionTimeout = connectionParameters?.connectionTimeout;
+      final response = connectionTimeout != null
+          ? await client.send(request).timeout(connectionTimeout)
+          : await client.send(request);
 
       if (response.statusCode != 200 && response.statusCode != 202) {
         throw HttpExceptionWithStatus(
@@ -248,9 +258,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final file = io.File(filePath);
       final sink = file.openWrite();
 
+      final requestTimeout = connectionParameters?.requestTimeout;
+      final stream = requestTimeout != null
+          ? response.stream.timeout(requestTimeout)
+          : response.stream;
+
       var receivedBytes = 0;
       try {
-        await for (final chunk in response.stream) {
+        await for (final chunk in stream) {
           receivedBytes += chunk.length;
           sink.add(chunk);
           if (withProgress) {

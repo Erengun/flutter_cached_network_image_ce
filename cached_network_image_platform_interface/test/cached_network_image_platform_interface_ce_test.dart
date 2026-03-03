@@ -251,6 +251,66 @@ void main() {
       expect(cacheLogger, same(custom));
     });
   });
+
+  group('ConnectionParameters', () {
+    test('can be created with no arguments', () {
+      const cp = ConnectionParameters();
+      expect(cp.connectionTimeout, isNull);
+      expect(cp.requestTimeout, isNull);
+    });
+
+    test('stores connectionTimeout', () {
+      const cp = ConnectionParameters(
+        connectionTimeout: Duration(seconds: 10),
+      );
+      expect(cp.connectionTimeout, const Duration(seconds: 10));
+      expect(cp.requestTimeout, isNull);
+    });
+
+    test('stores requestTimeout', () {
+      const cp = ConnectionParameters(
+        requestTimeout: Duration(seconds: 30),
+      );
+      expect(cp.connectionTimeout, isNull);
+      expect(cp.requestTimeout, const Duration(seconds: 30));
+    });
+
+    test('stores both timeouts', () {
+      const cp = ConnectionParameters(
+        connectionTimeout: Duration(seconds: 5),
+        requestTimeout: Duration(seconds: 15),
+      );
+      expect(cp.connectionTimeout, const Duration(seconds: 5));
+      expect(cp.requestTimeout, const Duration(seconds: 15));
+    });
+
+    test('equality works', () {
+      const a = ConnectionParameters(
+        connectionTimeout: Duration(seconds: 10),
+        requestTimeout: Duration(seconds: 30),
+      );
+      const b = ConnectionParameters(
+        connectionTimeout: Duration(seconds: 10),
+        requestTimeout: Duration(seconds: 30),
+      );
+      const c = ConnectionParameters(
+        connectionTimeout: Duration(seconds: 5),
+        requestTimeout: Duration(seconds: 30),
+      );
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(equals(c)));
+    });
+
+    test('toString is informative', () {
+      const cp = ConnectionParameters(
+        connectionTimeout: Duration(seconds: 10),
+        requestTimeout: Duration(seconds: 30),
+      );
+      expect(cp.toString(), contains('connectionTimeout'));
+      expect(cp.toString(), contains('requestTimeout'));
+    });
+  });
 }
 
 Future<ui.Codec> decoder(

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'src/cache_manager.dart';
 
 export 'src/cache_manager.dart';
+export 'src/connection_parameters.dart';
 export 'src/file_response.dart';
 export 'src/http_exception.dart';
 export 'src/image_format_detector.dart';

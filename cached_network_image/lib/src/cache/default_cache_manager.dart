@@ -293,10 +293,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
             await tempFile.rename(filePath);
             movedToFinalPath = true;
-
-            if (backupFile != null && await backupFile.exists()) {
-              await backupFile.delete();
-            }
           } on Object catch (_) {
             if (backupFile != null && await backupFile.exists()) {
               if (await finalFile.exists()) {
@@ -305,6 +301,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
               await backupFile.rename(filePath);
             }
             rethrow;
+          }
+
+          if (backupFile != null && await backupFile.exists()) {
+            try {
+              await backupFile.delete();
+            } on Object catch (e) {
+              cacheLogger.log(
+                'CacheManager: Failed to delete backup file for $filePath with error:\n$e',
+                CacheManagerLogLevel.warning,
+              );
+            }
           }
         }
       } on Object catch (_) {

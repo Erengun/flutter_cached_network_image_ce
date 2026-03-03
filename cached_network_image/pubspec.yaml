@@ -14,7 +14,7 @@ environment:
   flutter: '>=3.10.0'
 
 dependencies:
-  cached_network_image_platform_interface_ce: ^5.1.0
+  cached_network_image_platform_interface_ce: ^5.2.0
   cached_network_image_web_ce: ^2.1.0
   file: '>=7.0.0 <8.0.0'
   flutter:

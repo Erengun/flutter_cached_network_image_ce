@@ -626,6 +626,131 @@ void main() {
   });
 
   // =====================================================================
+  // Hive box corruption recovery (#12)
+  // =====================================================================
+
+  group('WebCacheManager corruption recovery', () {
+    test('recovers from corrupted Hive meta box on init', () async {
+      // First, create valid entries.
+      final manager1 = DefaultCacheManager(hiveInstance: testHive);
+      await manager1.putFile(
+        'https://example.com/corrupt-web.png',
+        [1, 2, 3],
+        fileExtension: 'png',
+      );
+      final cached1 = await manager1.getFileFromCache(
+        'https://example.com/corrupt-web.png',
+      );
+      expect(cached1, isNotNull);
+      await manager1.dispose();
+
+      // Corrupt the meta box file by writing garbage data with an invalid
+      // typeId, simulating the exact error from issue #12.
+      final hiveFiles = io.Directory(hiveTempDir.path)
+          .listSync()
+          .whereType<io.File>()
+          .where((f) =>
+              f.path.contains('cached_network_image_cache') &&
+              f.path.endsWith('.hive'))
+          .toList();
+      expect(hiveFiles, isNotEmpty, reason: 'Should have .hive box file');
+
+      for (final hiveFile in hiveFiles) {
+        await hiveFile.writeAsBytes([
+          0x48, 0x49, 0x56, 0x45, // HIVE magic
+          0x01, // version
+          0x00, 0x00, // unused
+          0xFF, 0xFF, 0xFF, 0xFF, // corrupted frame
+          0x79, // typeId 121 (0x79) - the error from issue #12
+          0x00, 0x00, 0x00, 0x00,
+        ]);
+      }
+
+      // Re-create manager with a fresh Hive instance (simulating app restart).
+      final freshHive = HiveImpl();
+      freshHive.init(hiveTempDir.path);
+      addTearDown(() => freshHive.close());
+
+      final manager2 = DefaultCacheManager(hiveInstance: freshHive);
+
+      // Old entry is gone (box was wiped), but no crash.
+      final cached2 = await manager2.getFileFromCache(
+        'https://example.com/corrupt-web.png',
+      );
+      expect(cached2, isNull);
+
+      // New entries should work fine.
+      await manager2.putFile(
+        'https://example.com/after-web-recovery.png',
+        [4, 5, 6],
+        fileExtension: 'png',
+      );
+      final cached3 = await manager2.getFileFromCache(
+        'https://example.com/after-web-recovery.png',
+      );
+      expect(cached3, isNotNull);
+      expect(
+        cached3!.originalUrl,
+        'https://example.com/after-web-recovery.png',
+      );
+
+      await manager2.emptyCache();
+      await manager2.dispose();
+    });
+
+    test('concurrent callers all succeed after corruption recovery', () async {
+      // Create valid data, then corrupt it.
+      final manager1 = DefaultCacheManager(hiveInstance: testHive);
+      await manager1.putFile(
+        'https://example.com/pre-corrupt.png',
+        [1],
+        fileExtension: 'png',
+      );
+      await manager1.dispose();
+
+      // Corrupt the meta box.
+      for (final hiveFile in io.Directory(hiveTempDir.path)
+          .listSync()
+          .whereType<io.File>()
+          .where((f) =>
+              f.path.contains('cached_network_image_cache') &&
+              f.path.endsWith('.hive'))) {
+        await hiveFile.writeAsBytes([
+          0x48, 0x49, 0x56, 0x45, 0x01, 0x00, 0x00,
+          0xFF, 0xFF, 0xFF, 0xFF, 0x79, 0x00, 0x00, 0x00, 0x00,
+        ]);
+      }
+
+      final freshHive = HiveImpl();
+      freshHive.init(hiveTempDir.path);
+      addTearDown(() => freshHive.close());
+
+      final manager2 = DefaultCacheManager(hiveInstance: freshHive);
+
+      // Fire concurrent operations — all should complete without throwing.
+      final futures = List.generate(
+        10,
+        (i) => manager2.putFile(
+          'https://example.com/web-concurrent-recovery-$i.png',
+          List.filled(i + 1, i),
+          fileExtension: 'png',
+        ),
+      );
+      await Future.wait(futures);
+
+      for (var i = 0; i < 10; i++) {
+        final cached = await manager2.getFileFromCache(
+          'https://example.com/web-concurrent-recovery-$i.png',
+        );
+        expect(cached, isNotNull, reason: 'Entry $i should exist');
+      }
+
+      await manager2.emptyCache();
+      await manager2.dispose();
+    });
+  });
+
+  // =====================================================================
   // Dispose / lifecycle
   // =====================================================================
 

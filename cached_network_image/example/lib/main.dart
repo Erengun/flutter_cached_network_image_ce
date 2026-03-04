@@ -71,6 +71,23 @@ class BasicContent extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
+            // Image loaded with custom connection timeouts.
+            _sizedContainer(
+              CachedNetworkImage(
+                cacheManager: DefaultCacheManager(
+                  connectionParameters: ConnectionParameters(
+                    connectionTimeout: const Duration(seconds: 10),
+                    requestTimeout: const Duration(seconds: 30),
+                  ),
+                ),
+                imageUrl:
+                    'https://images.unsplash.com/photo-1522205408450-add114ad53fe?ixlib=rb-0.3.5&ixid=eyJhcHBfaWQiOjEyMDd9&s=368f45b0888aeb0b7b08e3a1084d3ede&auto=format&fit=crop&w=1950&q=80',
+                placeholder: (context, url) =>
+                    const CircularProgressIndicator(),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
+              ),
+            ),
             _blurHashImage(),
             _sizedContainer(
               CachedNetworkImage(

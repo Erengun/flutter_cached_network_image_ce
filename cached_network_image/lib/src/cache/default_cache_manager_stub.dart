@@ -11,6 +11,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   DefaultCacheManager({
     Duration stalePeriod = const Duration(days: 7),
     int maxNrOfCacheObjects = 200,
+    ConnectionParameters? connectionParameters,
   }) {
     throw UnsupportedError(
       'DefaultCacheManager is not supported on this platform.',

@@ -7,6 +7,7 @@ export 'package:cached_network_image_platform_interface_ce/cached_network_image_
         BaseCacheManager,
         CacheManager,
         CacheManagerLogLevel,
+        ConnectionParameters,
         DownloadProgress,
         FileInfo,
         FileResponse,

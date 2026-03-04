@@ -6,8 +6,32 @@ import 'package:cached_network_image_platform_interface_ce/cached_network_image_
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
+// ignore: implementation_imports
+import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
+
+/// A custom object that forces Hive to write a user-defined typeId into
+/// the box file. When the box is later opened without this adapter
+/// registered, Hive throws [HiveError] with "unknown typeId".
+class _CorruptPayload {
+  _CorruptPayload(this.data);
+  final String data;
+}
+
+/// Adapter with typeId 121 — the exact id reported in issue #12.
+class _CorruptPayloadAdapter extends TypeAdapter<_CorruptPayload> {
+  @override
+  final int typeId = 121;
+
+  @override
+  _CorruptPayload read(BinaryReader reader) =>
+      _CorruptPayload(reader.readString());
+
+  @override
+  void write(BinaryWriter writer, _CorruptPayload obj) =>
+      writer.writeString(obj.data);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -729,11 +753,15 @@ void main() {
   });
 
   // ---- Issue 4: Hive box corruption recovery (#12) ----
+  //
+  // Reproduces the exact crash: "HiveError: Cannot read, unknown typeId: 121".
+  // A custom TypeAdapter writes an entry with typeId 121 into the cache box.
+  // When the box is re-opened without that adapter registered, openBox throws
+  // HiveError. The fix should catch this and delete + recreate the box.
 
   group('Regression: Hive box corruption recovery', () {
     test('recovers from corrupted Hive box on init', () async {
-      final customDir =
-          io.Directory.systemTemp.createTempSync('corrupt_hive_');
+      final customDir = io.Directory.systemTemp.createTempSync('corrupt_hive_');
       addTearDown(() {
         try {
           customDir.deleteSync(recursive: true);
@@ -755,29 +783,19 @@ void main() {
       expect(cached1, isNotNull);
       await manager1.dispose();
 
-      // Now corrupt the Hive box file by writing garbage data.
-      final hiveDir =
-          io.Directory('${customDir.path}/cached_network_image_ce/hive');
-      expect(hiveDir.existsSync(), isTrue);
-
-      final hiveFiles = hiveDir
-          .listSync()
-          .whereType<io.File>()
-          .where((f) => f.path.endsWith('.hive'))
-          .toList();
-      expect(hiveFiles, isNotEmpty, reason: 'Should have .hive box file');
-
-      for (final hiveFile in hiveFiles) {
-        // Write corrupted binary data that includes an invalid typeId.
-        await hiveFile.writeAsBytes([
-          0x48, 0x49, 0x56, 0x45, // HIVE magic
-          0x01, // version
-          0x00, 0x00, // unused
-          0xFF, 0xFF, 0xFF, 0xFF, // corrupted frame
-          0x79, // typeId 121 (0x79) - the exact error from issue #12
-          0x00, 0x00, 0x00, 0x00,
-        ]);
-      }
+      // Poison the same Hive box by writing an entry with a custom
+      // TypeAdapter (typeId 121). This simulates cross-isolate corruption
+      // or leftover data from a removed adapter.
+      final hivePath = '${customDir.path}/cached_network_image_ce/hive';
+      final poisonHive = HiveImpl();
+      poisonHive.registerAdapter(_CorruptPayloadAdapter());
+      final poisonBox = await poisonHive.openBox(
+        'cached_network_image_cache',
+        path: hivePath,
+      );
+      await poisonBox.put('__corrupt__', _CorruptPayload('bad'));
+      await poisonBox.close();
+      await poisonHive.close();
 
       // Re-create the manager — it should recover from corruption.
       final manager2 = DefaultCacheManager(
@@ -815,7 +833,7 @@ void main() {
         } on Object catch (_) {}
       });
 
-      // Create a valid cache first, then corrupt it.
+      // Create a valid cache first, then poison the box.
       final manager1 = DefaultCacheManager(
         cacheDirectoryProvider: () async => customDir,
       );
@@ -826,18 +844,17 @@ void main() {
       );
       await manager1.dispose();
 
-      // Corrupt the Hive box.
-      final hiveDir =
-          io.Directory('${customDir.path}/cached_network_image_ce/hive');
-      for (final hiveFile in hiveDir
-          .listSync()
-          .whereType<io.File>()
-          .where((f) => f.path.endsWith('.hive'))) {
-        await hiveFile.writeAsBytes([
-          0x48, 0x49, 0x56, 0x45, 0x01, 0x00, 0x00,
-          0xFF, 0xFF, 0xFF, 0xFF, 0x79, 0x00, 0x00, 0x00, 0x00,
-        ]);
-      }
+      // Poison the box with an unregistered typeId entry.
+      final hivePath = '${customDir.path}/cached_network_image_ce/hive';
+      final poisonHive = HiveImpl();
+      poisonHive.registerAdapter(_CorruptPayloadAdapter());
+      final poisonBox = await poisonHive.openBox(
+        'cached_network_image_cache',
+        path: hivePath,
+      );
+      await poisonBox.put('__corrupt__', _CorruptPayload('bad'));
+      await poisonBox.close();
+      await poisonHive.close();
 
       // Create a new manager and fire concurrent operations.
       final manager2 = DefaultCacheManager(

@@ -728,6 +728,146 @@ void main() {
     });
   });
 
+  // ---- Issue 4: Hive box corruption recovery (#12) ----
+
+  group('Regression: Hive box corruption recovery', () {
+    test('recovers from corrupted Hive box on init', () async {
+      final customDir =
+          io.Directory.systemTemp.createTempSync('corrupt_hive_');
+      addTearDown(() {
+        try {
+          customDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      // First, create a valid cache entry so files exist on disk.
+      final manager1 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+      await manager1.putFile(
+        'https://example.com/corrupt-test.bin',
+        [1, 2, 3],
+        fileExtension: 'bin',
+      );
+      final cached1 = await manager1.getFileFromCache(
+        'https://example.com/corrupt-test.bin',
+      );
+      expect(cached1, isNotNull);
+      await manager1.dispose();
+
+      // Now corrupt the Hive box file by writing garbage data.
+      final hiveDir =
+          io.Directory('${customDir.path}/cached_network_image_ce/hive');
+      expect(hiveDir.existsSync(), isTrue);
+
+      final hiveFiles = hiveDir
+          .listSync()
+          .whereType<io.File>()
+          .where((f) => f.path.endsWith('.hive'))
+          .toList();
+      expect(hiveFiles, isNotEmpty, reason: 'Should have .hive box file');
+
+      for (final hiveFile in hiveFiles) {
+        // Write corrupted binary data that includes an invalid typeId.
+        await hiveFile.writeAsBytes([
+          0x48, 0x49, 0x56, 0x45, // HIVE magic
+          0x01, // version
+          0x00, 0x00, // unused
+          0xFF, 0xFF, 0xFF, 0xFF, // corrupted frame
+          0x79, // typeId 121 (0x79) - the exact error from issue #12
+          0x00, 0x00, 0x00, 0x00,
+        ]);
+      }
+
+      // Re-create the manager — it should recover from corruption.
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+
+      // Old entry is gone (box was wiped), but no crash.
+      final cached2 = await manager2.getFileFromCache(
+        'https://example.com/corrupt-test.bin',
+      );
+      expect(cached2, isNull);
+
+      // New entries should work fine.
+      await manager2.putFile(
+        'https://example.com/after-recovery.bin',
+        [4, 5, 6],
+        fileExtension: 'bin',
+      );
+      final cached3 = await manager2.getFileFromCache(
+        'https://example.com/after-recovery.bin',
+      );
+      expect(cached3, isNotNull);
+      expect(cached3!.originalUrl, 'https://example.com/after-recovery.bin');
+
+      await manager2.emptyCache();
+      await manager2.dispose();
+    });
+
+    test('concurrent callers all succeed after corruption recovery', () async {
+      final customDir =
+          io.Directory.systemTemp.createTempSync('corrupt_concurrent_');
+      addTearDown(() {
+        try {
+          customDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      // Create a valid cache first, then corrupt it.
+      final manager1 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+      await manager1.putFile(
+        'https://example.com/pre-corruption.bin',
+        [1],
+        fileExtension: 'bin',
+      );
+      await manager1.dispose();
+
+      // Corrupt the Hive box.
+      final hiveDir =
+          io.Directory('${customDir.path}/cached_network_image_ce/hive');
+      for (final hiveFile in hiveDir
+          .listSync()
+          .whereType<io.File>()
+          .where((f) => f.path.endsWith('.hive'))) {
+        await hiveFile.writeAsBytes([
+          0x48, 0x49, 0x56, 0x45, 0x01, 0x00, 0x00,
+          0xFF, 0xFF, 0xFF, 0xFF, 0x79, 0x00, 0x00, 0x00, 0x00,
+        ]);
+      }
+
+      // Create a new manager and fire concurrent operations.
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+
+      final futures = List.generate(
+        10,
+        (i) => manager2.putFile(
+          'https://example.com/concurrent-$i.bin',
+          List.filled(i + 1, i),
+          fileExtension: 'bin',
+        ),
+      );
+
+      // All should complete without throwing.
+      await Future.wait(futures);
+
+      for (var i = 0; i < 10; i++) {
+        final cached = await manager2.getFileFromCache(
+          'https://example.com/concurrent-$i.bin',
+        );
+        expect(cached, isNotNull, reason: 'Entry $i should exist');
+      }
+
+      await manager2.emptyCache();
+      await manager2.dispose();
+    });
+  });
+
   // ---- putFile / getFileFromCache / removeFile / emptyCache ----
 
   group('DefaultCacheManager cache operations', () {

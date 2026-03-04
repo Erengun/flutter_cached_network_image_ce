@@ -94,11 +94,38 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     // On web, Hive uses IndexedDB — no path argument needed.
     // We use a private HiveImpl instance to avoid conflicts with the
     // host app's own Hive boxes.
-    _metaBox = await _hive.openBox<Map>(_kMetaBoxName);
-    _dataBox = await _hive.openLazyBox<List<int>>(_kDataBoxName);
+    try {
+      _metaBox = await _hive.openBox<Map>(_kMetaBoxName);
+      _dataBox = await _hive.openLazyBox<List<int>>(_kDataBoxName);
+    } on HiveError catch (e) {
+      // Box corruption (e.g. "Cannot read, unknown typeId: 121").
+      // Since this is a cache, we can safely delete the corrupted boxes
+      // and start fresh. Cached images will simply be re-downloaded.
+      cacheLogger.log(
+        'CacheManager: Hive box corrupted, resetting cache: $e',
+        CacheManagerLogLevel.warning,
+      );
+      await _safeDeleteBox(_kMetaBoxName);
+      await _safeDeleteBox(_kDataBoxName);
+      _metaBox = await _hive.openBox<Map>(_kMetaBoxName);
+      _dataBox = await _hive.openLazyBox<List<int>>(_kDataBoxName);
+    }
 
     // Run cleanup in background.
     unawaited(_cleanupOldEntries());
+  }
+
+  /// Attempts to delete a Hive box from disk, tolerating missing files.
+  ///
+  /// [HiveImpl.deleteBoxFromDisk] can throw [PathNotFoundException] when
+  /// auxiliary files (e.g. `.lock`) are already gone. We swallow the error
+  /// since we're already in a corruption-recovery path.
+  Future<void> _safeDeleteBox(String boxName) async {
+    try {
+      await _hive.deleteBoxFromDisk(boxName);
+    } on Object catch (_) {
+      // Best-effort: if the box files are already gone, that's fine.
+    }
   }
 
   /// Gets the file extension from a URL.

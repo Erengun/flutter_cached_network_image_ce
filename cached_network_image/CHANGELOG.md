@@ -1,3 +1,11 @@
+## [4.6.2] - 2026-03-04
+
+* **Fix:** Handle Hive box corruption gracefully during cache initialization.
+  * When `openBox` encounters a corrupted box with unknown typeIds (e.g., from removed adapters), catch `HiveError`, safely delete the box, and retry initialization.
+  * Cleans up orphaned cache files after box recovery to prevent stale data.
+  * Regression tests added for box corruption recovery on both IO and web platforms.
+  * Issue #12: Fixes production crash "HiveError: Cannot read, unknown typeId" reported via Firebase Crashlytics.
+
 ## [4.6.1] - 2026-03-04
 
 * **Fix:** Re-export `ConnectionParameters` from the main `cached_network_image_ce` barrel file so it is accessible without a separate `cached_network_image_platform_interface_ce` import.

@@ -122,10 +122,64 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     // Open the box with an explicit path on the private Hive instance.
     // This avoids calling Hive.init() which would conflict with the
     // host application's own Hive initialization.
-    _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
+    try {
+      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
+    } on HiveError catch (e) {
+      // Box corruption (e.g. "Cannot read, unknown typeId: 121").
+      // Since this is a cache, we can safely delete the corrupted box
+      // and start fresh. Cached images will simply be re-downloaded.
+      cacheLogger.log(
+        'CacheManager: Hive box corrupted, resetting cache: $e',
+        CacheManagerLogLevel.warning,
+      );
+      await _safeDeleteBox(_kBoxName, hivePath);
+      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
+
+      // Also remove cached files since their metadata is gone.
+      await _deleteCacheFiles();
+    }
 
     // Run cleanup in background
     unawaited(_cleanupOldFiles());
+  }
+
+  /// Attempts to delete a Hive box from disk, tolerating missing files.
+  ///
+  /// [HiveImpl.deleteBoxFromDisk] can throw [PathNotFoundException] when
+  /// auxiliary files (e.g. `.lock`) are already gone. In that case we
+  /// fall back to manually deleting the `.hive` file.
+  Future<void> _safeDeleteBox(String boxName, String boxPath) async {
+    try {
+      await _hive.deleteBoxFromDisk(boxName, path: boxPath);
+    } on Object catch (_) {
+      // Fallback: delete the .hive file directly.
+      final boxFile = io.File(path.join(boxPath, '$boxName.hive'));
+      if (await boxFile.exists()) {
+        await boxFile.delete();
+      }
+    }
+  }
+
+  /// Deletes all cached image files in the cache directory.
+  ///
+  /// Called after a corruption recovery to remove orphaned files whose
+  /// metadata has been lost.
+  Future<void> _deleteCacheFiles() async {
+    try {
+      final cacheDir = io.Directory(_cacheDir!);
+      if (await cacheDir.exists()) {
+        await for (final entity in cacheDir.list()) {
+          if (entity is io.File) {
+            await entity.delete();
+          }
+        }
+      }
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error cleaning orphaned cache files: $e',
+        CacheManagerLogLevel.warning,
+      );
+    }
   }
 
   String _cacheFilePath(String relativePath) {

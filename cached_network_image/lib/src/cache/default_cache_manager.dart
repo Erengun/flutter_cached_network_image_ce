@@ -186,6 +186,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     return path.join(_cacheDir!, relativePath);
   }
 
+  Future<void> _ensureCacheDirectoryExists() async {
+    await io.Directory(_cacheDir!).create(recursive: true);
+  }
+
   /// Builds a relative file path from key and extension.
   String _generateRelativePath(String key, String fileExtension) {
     final hash = key.hashCode.toUnsigned(32).toRadixString(16);
@@ -309,6 +313,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final fileExtension = _getFileExtensionFromUrl(url);
       final relativePath = _generateRelativePath(key, fileExtension);
       final filePath = _cacheFilePath(relativePath);
+
+      await _ensureCacheDirectoryExists();
+
       final tempFilePath =
           '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
       final tempFile = io.File(tempFilePath);
@@ -438,6 +445,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final relativePath = _generateRelativePath(key, fileExtension);
     final filePath = _cacheFilePath(relativePath);
+
+    await _ensureCacheDirectoryExists();
 
     final file = io.File(filePath);
     await file.writeAsBytes(fileBytes);

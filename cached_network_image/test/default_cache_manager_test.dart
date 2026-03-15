@@ -595,6 +595,7 @@ void main() {
       expect(cached, isNotNull);
 
       await manager.emptyCache();
+      await manager.dispose();
     });
 
     test('recreates cache directory if deleted during lifetime before download',
@@ -634,6 +635,7 @@ void main() {
       expect(fileInfos, isNotEmpty);
 
       await manager.emptyCache();
+      await manager.dispose();
     });
 
     test('recovers when Hive metadata dir is deleted but cache files remain',

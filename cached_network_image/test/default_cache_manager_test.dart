@@ -557,6 +557,86 @@ void main() {
   // ---- Issue 3: Cache directory / Hive metadata resilience ----
 
   group('Regression: cache directory resilience', () {
+    test(
+        'recreates cache directory if deleted during lifetime before putFile',
+        () async {
+      final customDir =
+          io.Directory.systemTemp.createTempSync('resilience_runtime_put_');
+      addTearDown(() {
+        try {
+          customDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+
+      await manager.putFile(
+        'https://example.com/runtime-put-initial.bin',
+        [1],
+        fileExtension: 'bin',
+      );
+
+      final cacheSubDir =
+          io.Directory('${customDir.path}/cached_network_image_ce');
+      if (cacheSubDir.existsSync()) {
+        cacheSubDir.deleteSync(recursive: true);
+      }
+
+      await manager.putFile(
+        'https://example.com/runtime-put-after-delete.bin',
+        [2, 3],
+        fileExtension: 'bin',
+      );
+
+      final cached = await manager.getFileFromCache(
+        'https://example.com/runtime-put-after-delete.bin',
+      );
+      expect(cached, isNotNull);
+
+      await manager.emptyCache();
+    });
+
+    test(
+        'recreates cache directory if deleted during lifetime before download',
+        () async {
+      final customDir = io.Directory.systemTemp
+          .createTempSync('resilience_runtime_download_');
+      addTearDown(() {
+        try {
+          customDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+        httpClientFactory: () => http_testing.MockClient(
+          (request) async => http.Response('runtime-download', 200),
+        ),
+      );
+
+      await manager.putFile(
+        'https://example.com/runtime-download-initial.bin',
+        [1],
+        fileExtension: 'bin',
+      );
+
+      final cacheSubDir =
+          io.Directory('${customDir.path}/cached_network_image_ce');
+      if (cacheSubDir.existsSync()) {
+        cacheSubDir.deleteSync(recursive: true);
+      }
+
+      final events = await manager
+          .getFileStream('https://example.com/runtime-download-after-delete.png')
+          .toList();
+      final fileInfos = events.whereType<FileInfo>().toList();
+      expect(fileInfos, isNotEmpty);
+
+      await manager.emptyCache();
+    });
+
     test('recovers when Hive metadata dir is deleted but cache files remain',
         () async {
       final customDir =

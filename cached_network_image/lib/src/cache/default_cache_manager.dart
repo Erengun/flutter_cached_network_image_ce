@@ -511,9 +511,18 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     if (_cacheBox != null && _cacheBox!.isOpen) {
-      await _cacheBox!.close();
+      try {
+        await _cacheBox!.close();
+      } on Object catch (_) {
+        // Ignore errors when closing box (e.g. PathNotFoundException if the
+        // cache directory was deleted before dispose was called).
+      }
     }
-    await _hive.close();
+    try {
+      await _hive.close();
+    } on Object catch (_) {
+      // Ignore errors when closing Hive (e.g. residual lock file already gone).
+    }
 
     _cacheBox = null;
     _cacheDir = null;

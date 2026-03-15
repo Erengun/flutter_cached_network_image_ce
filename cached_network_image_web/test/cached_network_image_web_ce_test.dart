@@ -1,4 +1,6 @@
 // ignore_for_file: deprecated_member_use_from_same_package
+@TestOn('browser')
+library;
 
 import 'dart:async';
 import 'dart:ui' as ui;

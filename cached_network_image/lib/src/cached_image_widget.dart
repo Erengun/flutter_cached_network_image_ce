@@ -201,7 +201,13 @@ class CachedNetworkImage extends StatefulWidget {
   /// scope.
   final bool matchTextDirection;
 
-  /// Optional headers for the http request of the image url
+  /// Optional headers for the http request of the image url.
+  ///
+  /// **Note on Flutter Web:** Headers are only supported when using
+  /// [ImageRenderMethodForWeb.HttpGet] render method. The default
+  /// [ImageRenderMethodForWeb.HtmlImage] does not support custom headers.
+  /// If you provide headers on Web, you must also set
+  /// `imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet`.
   final Map<String, String>? httpHeaders;
 
   /// When set to true it will animate from the old image to the new image

@@ -52,7 +52,13 @@ class CachedNetworkImageProvider
   /// to avoid this issue.
   final ErrorListener? errorListener;
 
-  /// Set headers for the image provider, for example for authentication
+  /// Set headers for the image provider, for example for authentication.
+  ///
+  /// **Note on Flutter Web:** Headers are only supported when using
+  /// [ImageRenderMethodForWeb.HttpGet] render method. The default
+  /// [ImageRenderMethodForWeb.HtmlImage] does not support custom headers.
+  /// If you provide headers on Web, you must also set
+  /// `imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet`.
   final Map<String, String>? headers;
 
   /// Maximum height of the loaded image. If not null and using an

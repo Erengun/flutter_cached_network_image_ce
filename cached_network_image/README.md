@@ -144,6 +144,22 @@ On Flutter Web, timeout settings apply when using
 `ImageRenderMethodForWeb.HttpGet`. The `HtmlImage` render method uses the
 browser image pipeline and bypasses the cache manager HTTP path.
 
+**Web Platform Headers Support:** Custom headers (like `Authorization`) are
+**only supported with `ImageRenderMethodForWeb.HttpGet`**. The default
+`HtmlImage` render method does not support custom headers. If you need to
+send headers to authenticate image requests on Web, you must explicitly set:
+
+```dart
+CachedNetworkImage(
+  imageUrl: 'https://api.example.com/image.jpg',
+  httpHeaders: {'Authorization': 'Bearer token'},
+  imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+),
+```
+
+Note: Using `HttpGet` on Web disables the browser's default image caching
+mechanisms, so images are cached via the `cache_manager` instead.
+
 ### SVG Support
 
 Flutter's built-in image codec doesn't support SVG. When `CachedNetworkImage`

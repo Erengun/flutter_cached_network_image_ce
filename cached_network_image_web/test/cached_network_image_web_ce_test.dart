@@ -45,24 +45,49 @@ void main() {
     expect(stream, isNotNull);
   });
 
-  test('loadImageAsync with HtmlImage and headers throws assertion error', () {
-    final imageLoader = ImageLoader();
-    expect(
-      () => imageLoader.loadImageAsync(
-        'test.com/image',
-        null,
-        StreamController<ImageChunkEvent>(),
-        decoder,
-        MockCacheManager(),
-        null,
-        null,
-        {'Authorization': 'Bearer token'},
-        ImageRenderMethodForWeb.HtmlImage,
-        () => {},
-      ),
-      throwsAssertionError,
-    );
-  });
+  test(
+    'loadImageAsync with HtmlImage and headers throws ArgumentError',
+    () {
+      final imageLoader = ImageLoader();
+      expect(
+        () => imageLoader.loadImageAsync(
+          'test.com/image',
+          null,
+          StreamController<ImageChunkEvent>(),
+          decoder,
+          MockCacheManager(),
+          null,
+          null,
+          {'Authorization': 'Bearer token'},
+          ImageRenderMethodForWeb.HtmlImage,
+          () => {},
+        ),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test(
+    'loadBufferAsync with HtmlImage and headers throws ArgumentError',
+    () {
+      final imageLoader = ImageLoader();
+      expect(
+        () => imageLoader.loadBufferAsync(
+          'test.com/image',
+          null,
+          StreamController<ImageChunkEvent>(),
+          bufferDecoder,
+          MockCacheManager(),
+          null,
+          null,
+          {'Authorization': 'Bearer token'},
+          ImageRenderMethodForWeb.HtmlImage,
+          () => {},
+        ),
+        throwsArgumentError,
+      );
+    },
+  );
 
   test('loadImageAsync with HttpGet and headers works', () {
     final imageLoader = ImageLoader();

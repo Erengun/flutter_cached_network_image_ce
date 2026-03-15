@@ -557,8 +557,7 @@ void main() {
   // ---- Issue 3: Cache directory / Hive metadata resilience ----
 
   group('Regression: cache directory resilience', () {
-    test(
-        'recreates cache directory if deleted during lifetime before putFile',
+    test('recreates cache directory if deleted during lifetime before putFile',
         () async {
       final customDir =
           io.Directory.systemTemp.createTempSync('resilience_runtime_put_');
@@ -598,8 +597,7 @@ void main() {
       await manager.emptyCache();
     });
 
-    test(
-        'recreates cache directory if deleted during lifetime before download',
+    test('recreates cache directory if deleted during lifetime before download',
         () async {
       final customDir = io.Directory.systemTemp
           .createTempSync('resilience_runtime_download_');
@@ -629,7 +627,8 @@ void main() {
       }
 
       final events = await manager
-          .getFileStream('https://example.com/runtime-download-after-delete.png')
+          .getFileStream(
+              'https://example.com/runtime-download-after-delete.png')
           .toList();
       final fileInfos = events.whereType<FileInfo>().toList();
       expect(fileInfos, isNotEmpty);

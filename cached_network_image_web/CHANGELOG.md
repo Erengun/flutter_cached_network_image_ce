@@ -1,3 +1,11 @@
+## [2.1.1] - 2026-03-15
+
+* **Fix:** Enforce that HTTP headers can only be used with `HttpGet`. (PR #16)
+  * `HtmlImage` loader now throws an `ArgumentError` (instead of an assertion) when headers are supplied, providing a clear actionable message at runtime.
+  * `ImageLoader` automatically switches to `HttpGet` when headers are provided, matching documented behaviour.
+  * Improved error messages across both loaders to guide users toward the correct loader type.
+* Added `@TestOn('browser')` annotation to the web test file so tests are skipped gracefully on non-browser platforms. (PR #16)
+
 ## [2.1.0] - 2026-02-23
 
 * **Feature:** Added SVG format detection in `HttpGet` loader path

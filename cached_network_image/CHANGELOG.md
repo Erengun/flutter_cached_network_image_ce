@@ -1,3 +1,11 @@
+## [4.6.3] - 2026-03-15
+
+* **Fix:** Handle exceptions when closing the Hive cache box and Hive instance during `dispose()`. (PR #17)
+  * `PathNotFoundException` (e.g. when the cache directory was deleted before dispose) is now silently swallowed so callers can dispose without wrapping in try-catch.
+* **Feat:** Ensure the cache directory exists before any file read/write operation. (PR #17)
+  * Prevents `PathNotFoundException` on first use when the OS or test harness removes the temp directory between initialisation and the first cache put/get.
+* Added regression tests for cache-directory resilience and for safe disposal after `emptyCache()`. (PR #17)
+
 ## [4.6.2] - 2026-03-04
 
 * **Fix:** Handle Hive box corruption gracefully during cache initialization.

@@ -44,6 +44,61 @@ void main() {
     );
     expect(stream, isNotNull);
   });
+
+  test('loadImageAsync with HtmlImage and headers throws assertion error', () {
+    final imageLoader = ImageLoader();
+    expect(
+      () => imageLoader.loadImageAsync(
+        'test.com/image',
+        null,
+        StreamController<ImageChunkEvent>(),
+        decoder,
+        MockCacheManager(),
+        null,
+        null,
+        {'Authorization': 'Bearer token'},
+        ImageRenderMethodForWeb.HtmlImage,
+        () => {},
+      ),
+      throwsAssertionError,
+    );
+  });
+
+  test('loadImageAsync with HttpGet and headers works', () {
+    final imageLoader = ImageLoader();
+    final stream = imageLoader.loadImageAsync(
+      'test.com/image',
+      null,
+      StreamController<ImageChunkEvent>(),
+      decoder,
+      MockCacheManager(),
+      null,
+      null,
+      {'Authorization': 'Bearer token'},
+      ImageRenderMethodForWeb.HttpGet,
+      () => {},
+    );
+    expect(stream, isNotNull);
+  });
+
+  test('loadImageAsync with HtmlImage and no headers works', () {
+    final imageLoader = ImageLoader();
+    // This test would need actual image data to complete the stream,
+    // so we just verify that the stream is created without assertion error
+    final stream = imageLoader.loadImageAsync(
+      'test.com/image',
+      null,
+      StreamController<ImageChunkEvent>(),
+      decoder,
+      MockCacheManager(),
+      null,
+      null,
+      null,
+      ImageRenderMethodForWeb.HtmlImage,
+      () => {},
+    );
+    expect(stream, isNotNull);
+  });
 }
 
 Future<ui.Codec> decoder(

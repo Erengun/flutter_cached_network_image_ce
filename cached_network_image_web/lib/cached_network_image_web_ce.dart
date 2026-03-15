@@ -115,8 +115,8 @@ class ImageLoader implements platform.ImageLoader {
         imageRenderMethodForWeb,
         'imageRenderMethodForWeb',
         'Headers are only supported with ImageRenderMethodForWeb.HttpGet. '
-        'HtmlImage does not support custom headers. '
-        'Please use ImageRenderMethodForWeb.HttpGet when providing headers.',
+            'HtmlImage does not support custom headers. '
+            'Please use ImageRenderMethodForWeb.HttpGet when providing headers.',
       );
     }
 

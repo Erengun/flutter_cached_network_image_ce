@@ -110,7 +110,8 @@ class ImageLoader implements platform.ImageLoader {
   ) {
     // Ensure HttpGet is used when headers are provided
     assert(
-      headers == null || imageRenderMethodForWeb == platform.ImageRenderMethodForWeb.HttpGet,
+      headers == null ||
+          imageRenderMethodForWeb == platform.ImageRenderMethodForWeb.HttpGet,
       'Headers are only supported with ImageRenderMethodForWeb.HttpGet. '
       'HtmlImage does not support custom headers. '
       'Please use ImageRenderMethodForWeb.HttpGet when providing headers.',

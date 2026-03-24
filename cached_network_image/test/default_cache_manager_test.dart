@@ -1711,6 +1711,36 @@ void main() {
           reason: 'http.Client must be closed even on timeout');
     });
   });
+
+  // ---- Hive String Key Length Limit ----
+
+  group('Hive string key length limit fix', () {
+    test('handles keys longer than 255 characters without HiveError', () async {
+      final manager = DefaultCacheManager(
+        httpClientFactory: () => http_testing.MockClient(
+          (request) async => http.Response('data', 200),
+        ),
+      );
+
+      final longKey = 'https://example.com/very-long-url-'.padRight(300, 'a');
+
+      // 1. putFile
+      await manager.putFile(longKey, [1, 2, 3], fileExtension: 'bin');
+
+      // 2. getFileFromCache
+      final cached = await manager.getFileFromCache(longKey);
+      expect(cached, isNotNull);
+      expect(cached!.originalUrl, longKey);
+
+      // 3. removeFile
+      await manager.removeFile(longKey);
+      final cachedAfterRemove = await manager.getFileFromCache(longKey);
+      expect(cachedAfterRemove, isNull);
+
+      await manager.emptyCache();
+      await manager.dispose();
+    });
+  });
 }
 
 /// A wrapper around [http.Client] that tracks whether [close] was called.

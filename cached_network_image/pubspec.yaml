@@ -16,6 +16,7 @@ environment:
 dependencies:
   cached_network_image_platform_interface_ce: ^5.2.0
   cached_network_image_web_ce: ^2.1.0
+  crypto: ^3.0.0
   file: '>=7.0.0 <8.0.0'
   flutter:
     sdk: flutter

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:crypto/crypto.dart';
 import 'package:file/file.dart';
 import 'package:file/local.dart';
 import 'package:flutter/widgets.dart';
@@ -24,6 +26,14 @@ const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico'];
+
+/// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
+String _sanitizeBoxKey(String key) {
+  if (key.length <= 255) return key;
+  final hash = sha256.convert(utf8.encode(key)).toString();
+  // 255 max limit. 255 - 64 (sha256 hex length) - 1 (underscore) = 190
+  return '${key.substring(0, 190)}_$hash';
+}
 
 /// Signature for a function that returns the cache base directory.
 ///
@@ -390,7 +400,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final eTag = cacheHeaders['etag'];
 
       await _cacheBox!.put(
-          key,
+          _sanitizeBoxKey(key),
           CacheEntryMetadata(
             url: url,
             relativePath: relativePath,
@@ -413,7 +423,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(key);
+    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
@@ -422,7 +432,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final file = io.File(filePath);
     if (!file.existsSync()) {
       // Metadata exists but file is missing, clean up
-      await _cacheBox!.delete(key);
+      await _cacheBox!.delete(_sanitizeBoxKey(key));
       return null;
     }
 
@@ -453,7 +463,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     final validTill = DateTime.now().add(maxAge);
     _cacheBox!.put(
-        key,
+        _sanitizeBoxKey(key),
         CacheEntryMetadata(
           url: url,
           relativePath: relativePath,
@@ -469,14 +479,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<void> removeFile(String key) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(key);
+    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
     if (raw != null) {
       final metadata = CacheEntryMetadata.fromMap(raw);
       final file = io.File(_cacheFilePath(metadata.relativePath));
       if (await file.exists()) {
         await file.delete();
       }
-      await _cacheBox!.delete(key);
+      await _cacheBox!.delete(_sanitizeBoxKey(key));
     }
   }
 

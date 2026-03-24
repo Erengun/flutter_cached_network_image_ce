@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:crypto/crypto.dart';
 import 'package:file/file.dart';
 import 'package:file/memory.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -18,6 +20,14 @@ const _kDataBoxName = 'cached_network_image_data';
 const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
+
+/// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
+String _sanitizeBoxKey(String key) {
+  if (key.length <= 255) return key;
+  final hash = sha256.convert(utf8.encode(key)).toString();
+  // 255 max limit. 255 - 64 (sha256 hex length) - 1 (underscore) = 190
+  return '${key.substring(0, 190)}_$hash';
+}
 
 /// Web-specific [DefaultCacheManager] that stores both metadata and raw
 /// image bytes in Hive boxes (backed by IndexedDB on web).
@@ -286,7 +296,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
 
       await _metaBox!.put(
-        key,
+        _sanitizeBoxKey(key),
         CacheEntryMetadata(
           url: url,
           relativePath: relativePath,
@@ -295,7 +305,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           length: receivedBytes,
         ).toMap(),
       );
-      await _dataBox!.put(key, allBytes);
+      await _dataBox!.put(_sanitizeBoxKey(key), allBytes);
 
       final file = _bytesToFile(relativePath, allBytes);
       yield FileInfo(file, FileSource.Online, validTill, url);
@@ -311,15 +321,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }) async {
     await _ensureInitialized();
 
-    final raw = _metaBox!.get(key);
+    final raw = _metaBox!.get(_sanitizeBoxKey(key));
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
 
-    final bytes = await _dataBox!.get(key);
+    final bytes = await _dataBox!.get(_sanitizeBoxKey(key));
     if (bytes == null) {
       // Metadata exists but data is missing — clean up.
-      await _metaBox!.delete(key);
+      await _metaBox!.delete(_sanitizeBoxKey(key));
       return null;
     }
 
@@ -349,7 +359,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final validTill = DateTime.now().add(maxAge);
 
     await _metaBox!.put(
-      key,
+      _sanitizeBoxKey(key),
       CacheEntryMetadata(
         url: url,
         relativePath: relativePath,
@@ -358,7 +368,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         length: fileBytes.length,
       ).toMap(),
     );
-    await _dataBox!.put(key, fileBytes);
+    await _dataBox!.put(_sanitizeBoxKey(key), fileBytes);
 
     return _bytesToFile(relativePath, fileBytes);
   }
@@ -366,7 +376,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @override
   Future<void> removeFile(String key) async {
     await _ensureInitialized();
-    final raw = _metaBox!.get(key);
+    final raw = _metaBox!.get(_sanitizeBoxKey(key));
     if (raw != null) {
       final metadata = CacheEntryMetadata.fromMap(raw);
       try {
@@ -381,8 +391,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         );
       }
     }
-    await _metaBox!.delete(key);
-    await _dataBox!.delete(key);
+    await _metaBox!.delete(_sanitizeBoxKey(key));
+    await _dataBox!.delete(_sanitizeBoxKey(key));
   }
 
   @override

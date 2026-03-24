@@ -1,3 +1,7 @@
+## [4.6.4] - 2026-03-24
+
+* **Fix:** Resolve `HiveError` crashes caused by URL string keys exceeding 255 characters. Long cache keys are now automatically hashed using SHA-256 to remain under Hive's 255-character length limit.
+
 ## [4.6.3] - 2026-03-15
 
 * **Fix:** Handle exceptions when closing the Hive cache box and Hive instance during `dispose()`. (PR #17)

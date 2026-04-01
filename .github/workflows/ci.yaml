@@ -15,7 +15,7 @@ jobs:
           - cached_network_image_platform_interface
           - cached_network_image_web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -43,7 +43,7 @@ jobs:
           - package: cached_network_image_web
             test_args: "--platform chrome"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:

@@ -27,7 +27,7 @@ dependencies:
   path_provider: ^2.0.0
 
 dev_dependencies:
-  flutter_lints: ^4.0.0
+  flutter_lints: ">=4.0.0 <7.0.0"
   flutter_test:
     sdk: flutter
   mocktail: ^1.0.4

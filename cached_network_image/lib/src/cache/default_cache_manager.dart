@@ -85,7 +85,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Hive registry.
   final HiveInterface _hive = HiveImpl();
 
-  Box<Map>? _cacheBox;
+  LazyBox<Map>? _cacheBox;
   String? _cacheDir;
 
   /// Guards [_doInit] so that concurrent callers (e.g. multiple images
@@ -133,7 +133,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     // This avoids calling Hive.init() which would conflict with the
     // host application's own Hive initialization.
     try {
-      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
+      _cacheBox = await _hive.openLazyBox<Map>(_kBoxName, path: hivePath);
     } on HiveError catch (e) {
       // Box corruption (e.g. "Cannot read, unknown typeId: 121").
       // Since this is a cache, we can safely delete the corrupted box
@@ -143,7 +143,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         CacheManagerLogLevel.warning,
       );
       await _safeDeleteBox(_kBoxName, hivePath);
-      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
+      _cacheBox = await _hive.openLazyBox<Map>(_kBoxName, path: hivePath);
 
       // Also remove cached files since their metadata is gone.
       await _deleteCacheFiles();
@@ -423,7 +423,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
+    final raw = await _cacheBox!.get(_sanitizeBoxKey(key));
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
@@ -479,7 +479,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<void> removeFile(String key) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
+    final raw = await _cacheBox!.get(_sanitizeBoxKey(key));
     if (raw != null) {
       final metadata = CacheEntryMetadata.fromMap(raw);
       final file = io.File(_cacheFilePath(metadata.relativePath));
@@ -496,7 +496,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     // Delete all cached files
     for (final key in _cacheBox!.keys.toList()) {
-      final raw = _cacheBox!.get(key);
+      final raw = await _cacheBox!.get(key);
       if (raw != null) {
         final metadata = CacheEntryMetadata.fromMap(raw);
         final file = io.File(_cacheFilePath(metadata.relativePath));
@@ -546,7 +546,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final entries = <MapEntry<dynamic, CacheEntryMetadata>>[];
 
       for (final key in _cacheBox!.keys.toList()) {
-        final raw = _cacheBox!.get(key);
+        final raw = await _cacheBox!.get(key);
         if (raw != null) {
           entries.add(MapEntry(key, CacheEntryMetadata.fromMap(raw)));
         }

@@ -23,6 +23,7 @@ class CachedNetworkImageProvider
     this.maxHeight,
     this.maxWidth,
     this.scale = 1.0,
+    this.minimumGifFrameDuration = const Duration(milliseconds: 100),
     this.errorListener,
     this.headers,
     this.cacheManager,
@@ -44,6 +45,10 @@ class CachedNetworkImageProvider
 
   /// Scale of the image
   final double scale;
+
+  /// The minimum frame duration applied to GIF images when decoded frame
+  /// durations are extremely short.
+  final Duration minimumGifFrameDuration;
 
   /// Listener to be called when images fails to load.
   ///
@@ -90,6 +95,7 @@ class CachedNetworkImageProvider
       codec: _loadBufferAsync(key, chunkEvents, decode),
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
+      minimumGifFrameDuration: key.minimumGifFrameDuration,
       informationCollector: () => <DiagnosticsNode>[
         DiagnosticsProperty<ImageProvider>('Image provider', this),
         DiagnosticsProperty<CachedNetworkImageProvider>('Image key', key),
@@ -163,6 +169,7 @@ class CachedNetworkImageProvider
       codec: _loadImageAsync(key, chunkEvents, decode),
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
+      minimumGifFrameDuration: key.minimumGifFrameDuration,
       informationCollector: () => <DiagnosticsNode>[
         DiagnosticsProperty<ImageProvider>('Image provider', this),
         DiagnosticsProperty<CachedNetworkImageProvider>('Image key', key),
@@ -230,6 +237,7 @@ class CachedNetworkImageProvider
     if (other is CachedNetworkImageProvider) {
       return ((cacheKey ?? url) == (other.cacheKey ?? other.url)) &&
           scale == other.scale &&
+          minimumGifFrameDuration == other.minimumGifFrameDuration &&
           maxHeight == other.maxHeight &&
           maxWidth == other.maxWidth;
     }
@@ -237,8 +245,18 @@ class CachedNetworkImageProvider
   }
 
   @override
-  int get hashCode => Object.hash(cacheKey ?? url, scale, maxHeight, maxWidth);
+  int get hashCode => Object.hash(
+        cacheKey ?? url,
+        scale,
+        minimumGifFrameDuration,
+        maxHeight,
+        maxWidth,
+      );
 
   @override
-  String toString() => 'CachedNetworkImageProvider("$url", scale: $scale)';
+  String toString() => 'CachedNetworkImageProvider('
+      '"$url", '
+      'scale: $scale, '
+      'minimumGifFrameDuration: $minimumGifFrameDuration'
+      ')';
 }

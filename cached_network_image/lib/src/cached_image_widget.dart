@@ -75,11 +75,16 @@ class CachedNetworkImage extends StatefulWidget {
     String? cacheKey,
     BaseCacheManager? cacheManager,
     double scale = 1,
+    Duration minimumGifFrameDuration = const Duration(milliseconds: 100),
   }) async {
     final effectiveCacheManager =
         cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
     await effectiveCacheManager.removeFile(cacheKey ?? url);
-    return CachedNetworkImageProvider(url, scale: scale).evict();
+    return CachedNetworkImageProvider(
+      url,
+      scale: scale,
+      minimumGifFrameDuration: minimumGifFrameDuration,
+    ).evict();
   }
 
   /// Option to use cacheManager with other settings
@@ -253,6 +258,10 @@ class CachedNetworkImage extends StatefulWidget {
   /// Scale of the image.
   final double scale;
 
+  /// The minimum frame duration applied to GIF images when decoded frame
+  /// durations are extremely short.
+  final Duration minimumGifFrameDuration;
+
   /// When true (the default), the placeholder and fade-in/out animations are
   /// skipped when the image is already available in the disk cache. This
   /// prevents an unnecessary visual flicker for images that load almost
@@ -300,6 +309,7 @@ class CachedNetworkImage extends StatefulWidget {
     this.errorListener,
     this.imageRenderMethodForWeb = ImageRenderMethodForWeb.HtmlImage,
     this.scale = 1.0,
+    this.minimumGifFrameDuration = const Duration(milliseconds: 100),
     this.disablePlaceholderOnCacheHit = true,
   });
 
@@ -344,6 +354,7 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
         oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
         oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||
         oldWidget.scale != widget.scale ||
+        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration ||
         oldWidget.errorListener != widget.errorListener;
 
     if (imageConfigChanged) {
@@ -373,6 +384,7 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
       maxHeight: widget.maxHeightDiskCache,
       errorListener: widget.errorListener,
       scale: widget.scale,
+      minimumGifFrameDuration: widget.minimumGifFrameDuration,
     );
   }
 

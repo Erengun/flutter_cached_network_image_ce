@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui show Codec, FrameInfo;
 
+import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
@@ -20,8 +21,9 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     required double scale,
     Stream<ImageChunkEvent>? chunkEvents,
     InformationCollector? informationCollector,
-  }) : _informationCollector = informationCollector,
-       _scale = scale {
+    this.minimumGifFrameDuration = const Duration(milliseconds: 100),
+  })  : _informationCollector = informationCollector,
+        _scale = scale {
     codec.listen(
       (event) {
         if (_timer != null) {
@@ -60,6 +62,12 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   ui.Codec? _nextImageCodec;
   final double _scale;
   final InformationCollector? _informationCollector;
+
+  /// The minimum frame duration applied to GIF images when decoded frame
+  /// durations are extremely short.
+  ///
+  /// Defaults to 100ms.
+  final Duration minimumGifFrameDuration;
   ui.FrameInfo? _nextFrame;
 
   // When the current was first shown.
@@ -103,10 +111,10 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     if (_isFirstFrame() || _hasFrameDurationPassed(timestamp)) {
       _emitFrame(ImageInfo(image: _nextFrame!.image, scale: _scale));
       _shownTimestamp = timestamp;
-      _frameDuration = _nextFrame!.duration;
-      if (_frameDuration! <= const Duration(milliseconds: 10)) {
-        _frameDuration = const Duration(milliseconds: 100);
-      }
+      _frameDuration = clampGifFrameDuration(
+        _nextFrame!.duration,
+        minimumGifFrameDuration: minimumGifFrameDuration,
+      );
       _nextFrame = null;
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
         _switchToNewCodec();

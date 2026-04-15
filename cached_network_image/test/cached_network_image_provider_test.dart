@@ -54,6 +54,21 @@ void main() {
         expect(a, isNot(equals(b)));
       });
 
+      test(
+          'providers with different minimumGifFrameDuration values are not equal',
+          () {
+        const a = CachedNetworkImageProvider(
+          'https://example.com/img.png',
+          minimumGifFrameDuration: Duration(milliseconds: 100),
+        );
+        const b = CachedNetworkImageProvider(
+          'https://example.com/img.png',
+          minimumGifFrameDuration: Duration(milliseconds: 200),
+        );
+
+        expect(a, isNot(equals(b)));
+      });
+
       test('different maxHeight are not equal', () {
         const a = CachedNetworkImageProvider(
           'https://example.com/img.png',
@@ -95,6 +110,7 @@ void main() {
         const b = CachedNetworkImageProvider(
           'https://example.com/img.png',
           scale: 2.0,
+          minimumGifFrameDuration: Duration(milliseconds: 100),
           maxHeight: 100,
           maxWidth: 200,
         );
@@ -119,10 +135,12 @@ void main() {
         const provider = CachedNetworkImageProvider(
           'https://example.com/img.png',
           scale: 2.0,
+          minimumGifFrameDuration: Duration(milliseconds: 150),
         );
         final result = provider.toString();
         expect(result, contains('https://example.com/img.png'));
         expect(result, contains('2.0'));
+        expect(result, contains('0:00:00.150000'));
       });
     });
 

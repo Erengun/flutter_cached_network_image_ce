@@ -139,5 +139,3 @@ We welcome contributions! If you want to help maintain this essential package, p
 ## 📄 License
 
 This project is licensed under the MIT License.
-
-```

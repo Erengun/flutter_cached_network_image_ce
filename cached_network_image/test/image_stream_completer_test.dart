@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:flutter_test/flutter_test.dart';
@@ -84,6 +85,36 @@ void main() {
     image20x10 = await createTestImage(width: 20, height: 10);
     image200x100 = await createTestImage(width: 200, height: 100);
     image300x100 = await createTestImage(width: 300, height: 100);
+  });
+
+  group('clampGifFrameDuration', () {
+    test('clamps frame durations at or below 10ms', () {
+      expect(
+        clampGifFrameDuration(
+          const Duration(milliseconds: 10),
+          minimumGifFrameDuration: const Duration(milliseconds: 100),
+        ),
+        const Duration(milliseconds: 100),
+      );
+
+      expect(
+        clampGifFrameDuration(
+          const Duration(milliseconds: 5),
+          minimumGifFrameDuration: const Duration(milliseconds: 80),
+        ),
+        const Duration(milliseconds: 80),
+      );
+    });
+
+    test('keeps frame durations above 10ms unchanged', () {
+      expect(
+        clampGifFrameDuration(
+          const Duration(milliseconds: 11),
+          minimumGifFrameDuration: const Duration(milliseconds: 100),
+        ),
+        const Duration(milliseconds: 11),
+      );
+    });
   });
 
   testWidgets('Codec future fails', (WidgetTester tester) async {
@@ -494,6 +525,57 @@ void main() {
     // quit the test without pending timers.
     await tester.pump(const Duration(milliseconds: 400));
   });
+
+  testWidgets(
+    'short GIF frame durations are clamped to minimumGifFrameDuration',
+    (WidgetTester tester) async {
+      final mockCodec = MockCodec()
+        ..frameCount = 2
+        ..repetitionCount = -1;
+
+      final codecStream = StreamController<Codec>();
+
+      final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+        codec: codecStream.stream,
+        scale: 1.0,
+        minimumGifFrameDuration: const Duration(milliseconds: 100),
+      );
+
+      final emittedImages = <ImageInfo>[];
+      imageStream.addListener(
+        ImageStreamListener((ImageInfo image, bool synchronousCall) {
+          emittedImages.add(image);
+        }),
+      );
+
+      codecStream.add(mockCodec);
+      await tester.idle();
+
+      final FrameInfo frame1 =
+          FakeFrameInfo(const Duration(milliseconds: 10), image20x10);
+      mockCodec.completeNextFrame(frame1);
+      await tester.idle();
+      await tester.pump();
+
+      expect(emittedImages.length, 1);
+      expect(emittedImages.single.image.isCloneOf(frame1.image), true);
+
+      final FrameInfo frame2 =
+          FakeFrameInfo(const Duration(milliseconds: 200), image200x100);
+      mockCodec.completeNextFrame(frame2);
+      await tester.idle();
+
+      // The first frame duration is 10ms, but it should be clamped to 100ms.
+      await tester.pump(const Duration(milliseconds: 99));
+      expect(emittedImages.length, 1);
+
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(emittedImages.length, 2);
+      expect(emittedImages[1].image.isCloneOf(frame2.image), true);
+
+      await tester.pump(const Duration(milliseconds: 200));
+    },
+  );
 
   testWidgets('animation wraps back', (WidgetTester tester) async {
     final mockCodec = MockCodec();

@@ -69,7 +69,7 @@ The API is identical to the original package. You can use `CachedNetworkImage` d
 ### Basic Usage with Placeholder
 
 ```dart
-import 'package:cached_network_image_ce/cached_network_image_ce.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 
 CachedNetworkImage(
   imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
@@ -139,5 +139,3 @@ We welcome contributions! If you want to help maintain this essential package, p
 ## 📄 License
 
 This project is licensed under the MIT License.
-
-```

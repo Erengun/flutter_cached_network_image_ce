@@ -134,6 +134,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     // host application's own Hive initialization.
     try {
       _cacheBox = await _hive.openLazyBox<Map>(_kBoxName, path: hivePath);
+      // LazyBox only reads frame headers at open; probe every value so a
+      // corrupt typeId throws here and triggers the recovery path below
+      // instead of surfacing later from a swallowed background read.
+      for (final key in _cacheBox!.keys.toList()) {
+        await _cacheBox!.get(key);
+      }
     } on HiveError catch (e) {
       // Box corruption (e.g. "Cannot read, unknown typeId: 121").
       // Since this is a cache, we can safely delete the corrupted box
@@ -142,6 +148,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         'CacheManager: Hive box corrupted, resetting cache: $e',
         CacheManagerLogLevel.warning,
       );
+      if (_cacheBox != null && _cacheBox!.isOpen) {
+        try {
+          await _cacheBox!.close();
+        } on Object catch (_) {}
+      }
       await _safeDeleteBox(_kBoxName, hivePath);
       _cacheBox = await _hive.openLazyBox<Map>(_kBoxName, path: hivePath);
 
@@ -462,7 +473,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await file.writeAsBytes(fileBytes);
 
     final validTill = DateTime.now().add(maxAge);
-    _cacheBox!.put(
+    await _cacheBox!.put(
         _sanitizeBoxKey(key),
         CacheEntryMetadata(
           url: url,

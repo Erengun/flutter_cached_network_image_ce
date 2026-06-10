@@ -18,6 +18,12 @@ class HttpResponseData {
   const HttpResponseData({required this.response, required this.originalUrl});
 
   final http.StreamedResponse response;
+
+  /// The URL of the original request that produced this response.
+  ///
+  /// This field is informational. Changing it does not affect how the response
+  /// is stored in the cache — the original request URL is always used as the
+  /// cache key and metadata URL.
   final String originalUrl;
 }
 

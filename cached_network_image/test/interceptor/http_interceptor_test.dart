@@ -11,12 +11,73 @@ import 'package:http/testing.dart' as http_testing;
 
 // Minimal PNG bytes (1x1 transparent pixel)
 final _pngBytes = Uint8List.fromList([
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
-  0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-  0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0x00,
+  0x00,
+  0x00,
+  0x0D,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x06,
+  0x00,
+  0x00,
+  0x00,
+  0x1F,
+  0x15,
+  0xC4,
+  0x89,
+  0x00,
+  0x00,
+  0x00,
+  0x0A,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x78,
+  0x9C,
+  0x62,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x05,
+  0x00,
+  0x01,
+  0x0D,
+  0x0A,
+  0x2D,
+  0xB4,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4E,
+  0x44,
+  0xAE,
+  0x42,
+  0x60,
+  0x82,
 ]);
 
 // Each test uses a unique URL to avoid cross-test cache hits.
@@ -35,8 +96,8 @@ void main() {
   late io.Directory testTempDir;
 
   setUpAll(() {
-    testTempDir = io.Directory.systemTemp
-        .createTempSync('http_interceptor_test_');
+    testTempDir =
+        io.Directory.systemTemp.createTempSync('http_interceptor_test_');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/path_provider'),
@@ -172,7 +233,8 @@ void main() {
   });
 
   group('onError interceptor', () {
-    test('resolve() on network error — FileInfo returned, no exception', () async {
+    test('resolve() on network error — FileInfo returned, no exception',
+        () async {
       final mockClient = http_testing.MockClient((request) async {
         throw const io.SocketException('Network unreachable');
       });
@@ -208,10 +270,11 @@ void main() {
       );
     });
 
-    test('onError next() preserves HttpExceptionWithStatus identity for 404', () async {
+    test('onError next() preserves HttpExceptionWithStatus identity for 404',
+        () async {
       final interceptor = _PassthroughErrorInterceptor();
-      final mockClient = http_testing.MockClient((_) async =>
-        http.Response('Not Found', 404));
+      final mockClient =
+          http_testing.MockClient((_) async => http.Response('Not Found', 404));
 
       final manager = DefaultCacheManager(
         httpClientFactory: () => mockClient,
@@ -223,7 +286,7 @@ void main() {
         manager.getFileStream(_url8).toList(),
         throwsA(
           isA<HttpExceptionWithStatus>()
-            .having((e) => e.statusCode, 'statusCode', 404),
+              .having((e) => e.statusCode, 'statusCode', 404),
         ),
       );
       await manager.dispose();

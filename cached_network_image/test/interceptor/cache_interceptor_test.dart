@@ -12,12 +12,73 @@ import 'package:http/testing.dart' as http_testing;
 
 // Minimal PNG bytes (1x1 transparent pixel)
 final _pngBytes = Uint8List.fromList([
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
-  0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-  0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0x00,
+  0x00,
+  0x00,
+  0x0D,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x06,
+  0x00,
+  0x00,
+  0x00,
+  0x1F,
+  0x15,
+  0xC4,
+  0x89,
+  0x00,
+  0x00,
+  0x00,
+  0x0A,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x78,
+  0x9C,
+  0x62,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x05,
+  0x00,
+  0x01,
+  0x0D,
+  0x0A,
+  0x2D,
+  0xB4,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4E,
+  0x44,
+  0xAE,
+  0x42,
+  0x60,
+  0x82,
 ]);
 
 // Each test uses a unique URL to avoid cross-test cache hits.
@@ -35,8 +96,8 @@ void main() {
   late io.Directory testTempDir;
 
   setUpAll(() {
-    testTempDir = io.Directory.systemTemp
-        .createTempSync('cache_interceptor_test_');
+    testTempDir =
+        io.Directory.systemTemp.createTempSync('cache_interceptor_test_');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/path_provider'),
@@ -69,12 +130,14 @@ void main() {
   }
 
   group('onHit interceptor', () {
-    test('resolve() with modified FileInfo — modified FileInfo returned', () async {
+    test('resolve() with modified FileInfo — modified FileInfo returned',
+        () async {
       final mockClient = http_testing.MockClient((request) async {
         return http.Response.bytes(_pngBytes, 200);
       });
 
-      final modifiedFile = const LocalFileSystem().file('/synthetic/modified.png');
+      final modifiedFile =
+          const LocalFileSystem().file('/synthetic/modified.png');
       final modifiedValidTill = DateTime.now().add(const Duration(days: 999));
       final modifiedFileInfo = FileInfo(
         modifiedFile,
@@ -133,8 +196,7 @@ void main() {
       });
 
       // Create a real file so callers don't blow up if they read it.
-      final syntheticFilePath =
-          '${testTempDir.path}/synthetic_miss_file.png';
+      final syntheticFilePath = '${testTempDir.path}/synthetic_miss_file.png';
       await io.File(syntheticFilePath).writeAsBytes(_pngBytes);
       final syntheticFile = const LocalFileSystem().file(syntheticFilePath);
       final syntheticValidTill = DateTime.now().add(const Duration(days: 1));
@@ -161,7 +223,8 @@ void main() {
   });
 
   group('onStore interceptor', () {
-    test('reject() — Hive metadata not written, subsequent lookup is a miss', () async {
+    test('reject() — Hive metadata not written, subsequent lookup is a miss',
+        () async {
       var callCount = 0;
       final mockClient = http_testing.MockClient((request) async {
         callCount++;
@@ -184,7 +247,8 @@ void main() {
       expect(callCount, 2);
     });
 
-    test('next() (default) — metadata is written, second fetch is a hit (1 HTTP call)',
+    test(
+        'next() (default) — metadata is written, second fetch is a hit (1 HTTP call)',
         () async {
       var callCount = 0;
       final mockClient = http_testing.MockClient((request) async {
@@ -206,7 +270,8 @@ void main() {
       expect(callCount, 1);
     });
 
-    test('reject() removes disk file — no orphaned image file on disk', () async {
+    test('reject() removes disk file — no orphaned image file on disk',
+        () async {
       final mockClient = http_testing.MockClient((request) async {
         return http.Response.bytes(_pngBytes, 200);
       });
@@ -232,7 +297,8 @@ void main() {
   });
 
   group('onHit reject + onMiss resolve interaction', () {
-    test('onHit reject() triggers onMiss chain — miss interceptor wins over re-download',
+    test(
+        'onHit reject() triggers onMiss chain — miss interceptor wins over re-download',
         () async {
       var callCount = 0;
       final mockClient = http_testing.MockClient((request) async {

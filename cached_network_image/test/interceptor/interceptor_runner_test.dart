@@ -17,7 +17,8 @@ HttpRequestData _request({
 }) =>
     HttpRequestData(url: url, headers: headers ?? {});
 
-HttpResponseData _response({int status = 200, String url = 'https://example.com/image.jpg'}) =>
+HttpResponseData _response(
+        {int status = 200, String url = 'https://example.com/image.jpg'}) =>
     HttpResponseData(
       response: http.StreamedResponse(const Stream<List<int>>.empty(), status),
       originalUrl: url,
@@ -222,11 +223,13 @@ void main() {
       final req = _request(url: 'https://original.com/img.jpg');
       final result = await runOnRequestChain([], req);
       expect(result, isA<HttpRequestProceed>());
-      expect((result as HttpRequestProceed).data.url, 'https://original.com/img.jpg');
+      expect((result as HttpRequestProceed).data.url,
+          'https://original.com/img.jpg');
     });
 
     test('single interceptor calling next() passes data through', () async {
-      final result = await runOnRequestChain([_MutateUrlInterceptor()], _request());
+      final result =
+          await runOnRequestChain([_MutateUrlInterceptor()], _request());
       expect(result, isA<HttpRequestProceed>());
       expect(
         (result as HttpRequestProceed).data.url,
@@ -234,7 +237,8 @@ void main() {
       );
     });
 
-    test('two interceptors: first mutates url, second mutates headers', () async {
+    test('two interceptors: first mutates url, second mutates headers',
+        () async {
       final result = await runOnRequestChain(
         [_MutateUrlInterceptor(), _MutateHeadersInterceptor()],
         _request(),
@@ -245,7 +249,8 @@ void main() {
       expect(proceed.data.headers['x-custom'], 'injected');
     });
 
-    test('resolve() short-circuits: second interceptor not called, result is HttpRequestResolved',
+    test(
+        'resolve() short-circuits: second interceptor not called, result is HttpRequestResolved',
         () async {
       var secondCalled = false;
       final second = _CallTrackingInterceptor(() => secondCalled = true);
@@ -268,7 +273,8 @@ void main() {
       );
     });
 
-    test('synchronous throw in interceptor propagates as future error', () async {
+    test('synchronous throw in interceptor propagates as future error',
+        () async {
       final error = Exception('sync throw');
       await expectLater(
         runOnRequestChain([_ThrowingRequestInterceptor(error)], _request()),
@@ -276,7 +282,8 @@ void main() {
       );
     });
 
-    test('first calls next() with modified data then second calls resolve()', () async {
+    test('first calls next() with modified data then second calls resolve()',
+        () async {
       final resolveResp = _response(status: 201);
       final result = await runOnRequestChain(
         [_MutateUrlInterceptor(), _ResolveRequestInterceptor(resolveResp)],
@@ -311,7 +318,8 @@ void main() {
     test('resolve() short-circuits with the new response', () async {
       final resolveResp = _response(status: 201);
       var secondCalled = false;
-      final second = _CallTrackingResponseInterceptor(() => secondCalled = true);
+      final second =
+          _CallTrackingResponseInterceptor(() => secondCalled = true);
 
       final result = await runOnResponseChain(
         [_ResolveResponseInterceptor(resolveResp), second],
@@ -352,7 +360,8 @@ void main() {
       expect((result as HttpErrorRethrow).error, same(originalError));
     });
 
-    test('resolve() returns HttpErrorResolved with the provided response', () async {
+    test('resolve() returns HttpErrorResolved with the provided response',
+        () async {
       final resolveResp = _response(status: 200);
       final result = await runOnErrorChain(
         [_ResolveErrorInterceptor(resolveResp)],
@@ -363,7 +372,9 @@ void main() {
       expect((result as HttpErrorResolved).response.response.statusCode, 200);
     });
 
-    test('reject() with a new error returns HttpErrorRethrow with the new error', () async {
+    test(
+        'reject() with a new error returns HttpErrorRethrow with the new error',
+        () async {
       final newError = Exception('new error');
       final result = await runOnErrorChain(
         [_RejectErrorInterceptor(newError)],
@@ -387,11 +398,13 @@ void main() {
 
     test('next() passes through, returns CacheHitReturn', () async {
       final hit = _hitData();
-      final result = await runOnHitChain([const _PassThroughCacheInterceptor()], hit);
+      final result =
+          await runOnHitChain([const _PassThroughCacheInterceptor()], hit);
       expect(result, isA<CacheHitReturn>());
     });
 
-    test('resolve() returns CacheHitReturn with the modified FileInfo', () async {
+    test('resolve() returns CacheHitReturn with the modified FileInfo',
+        () async {
       final customFileInfo = _fileInfo(url: 'https://modified.com/image.jpg');
       final result = await runOnHitChain(
         [_ResolveHitInterceptor(customFileInfo)],
@@ -406,7 +419,8 @@ void main() {
       expect(result, isA<CacheHitRejected>());
     });
 
-    test('two interceptors: first passes through, second rejects → returns CacheHitRejected',
+    test(
+        'two interceptors: first passes through, second rejects → returns CacheHitRejected',
         () async {
       final result = await runOnHitChain(
         [const _PassThroughCacheInterceptor(), _RejectHitInterceptor()],
@@ -425,12 +439,14 @@ void main() {
     });
 
     test('next() returns null', () async {
-      final result = await runOnMissChain([const _PassThroughCacheInterceptor()], _missData());
+      final result = await runOnMissChain(
+          [const _PassThroughCacheInterceptor()], _missData());
       expect(result, isNull);
     });
 
     test('resolve() returns the provided FileInfo', () async {
-      final syntheticFileInfo = _fileInfo(url: 'https://synthetic.com/image.jpg');
+      final syntheticFileInfo =
+          _fileInfo(url: 'https://synthetic.com/image.jpg');
       final result = await runOnMissChain(
         [_ResolveMissInterceptor(syntheticFileInfo)],
         _missData(),
@@ -448,16 +464,20 @@ void main() {
     });
 
     test('next() returns true', () async {
-      final result = await runOnStoreChain([const _PassThroughCacheInterceptor()], _storeData());
+      final result = await runOnStoreChain(
+          [const _PassThroughCacheInterceptor()], _storeData());
       expect(result, isTrue);
     });
 
     test('reject() returns false', () async {
-      final result = await runOnStoreChain([_RejectStoreInterceptor()], _storeData());
+      final result =
+          await runOnStoreChain([_RejectStoreInterceptor()], _storeData());
       expect(result, isFalse);
     });
 
-    test('two interceptors: first passes through, second rejects → returns false', () async {
+    test(
+        'two interceptors: first passes through, second rejects → returns false',
+        () async {
       final result = await runOnStoreChain(
         [const _PassThroughCacheInterceptor(), _RejectStoreInterceptor()],
         _storeData(),

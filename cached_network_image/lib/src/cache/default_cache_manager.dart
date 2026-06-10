@@ -500,11 +500,23 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         file: io.File(filePath),
       ),
     );
+    final String deliveryPath;
     if (storeOutcome) {
       await _cacheBox!.put(_sanitizeBoxKey(key), metadata.toMap());
+      deliveryPath = filePath;
+    } else {
+      // Interceptor rejected storage: copy to a temp file for this delivery,
+      // then delete the cache-directory copy so nothing is orphaned there.
+      final tempPath =
+          '${io.Directory.systemTemp.path}/${filePath.split('/').last}'
+          '.${DateTime.now().microsecondsSinceEpoch}.nocache';
+      await io.File(filePath).copy(tempPath);
+      final f = io.File(filePath);
+      if (await f.exists()) await f.delete();
+      deliveryPath = tempPath;
     }
 
-    final localFile = const LocalFileSystem().file(filePath);
+    final localFile = const LocalFileSystem().file(deliveryPath);
     yield FileInfo(localFile, FileSource.Online, validTill, url);
   }
 

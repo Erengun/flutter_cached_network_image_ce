@@ -120,6 +120,51 @@ Image(image: CachedNetworkImageProvider(url))
 
 ```
 
+### HTTP Interceptors
+
+Intercept and modify HTTP requests, responses, and errors before they reach the cache layer:
+
+```dart
+class AuthInterceptor extends HttpInterceptor {
+  @override
+  void onRequest(HttpRequestData request, HttpRequestHandler handler) {
+    request.headers['Authorization'] = 'Bearer $token';
+    handler.next(request);
+  }
+}
+
+final manager = DefaultCacheManager(
+  httpInterceptors: [AuthInterceptor()],
+);
+```
+
+### Cache Interceptors (native IO only)
+
+Control cache hit, miss, and store events:
+
+```dart
+class NoCacheInterceptor extends CacheInterceptor {
+  @override
+  void onStore(CacheStoreData data, CacheStoreHandler handler) {
+    handler.reject(); // skip persisting this image
+  }
+}
+
+final manager = DefaultCacheManager(
+  cacheInterceptors: [NoCacheInterceptor()],
+);
+```
+
+Available hooks:
+
+| Hook | Trigger | Actions |
+| :--- | :--- | :--- |
+| `onHit` | Cached entry found | `next` · `resolve(fileInfo)` · `reject` (force re-download) |
+| `onMiss` | No cached entry | `next` · `resolve(fileInfo)` (skip download) |
+| `onStore` | Before writing to cache index | `next` · `reject` (skip persisting) |
+
+> `CacheInterceptor` is not available on web targets.
+
 ## ❓ FAQ
 
 **Q: Will I lose my users' existing cache if I migrate?**

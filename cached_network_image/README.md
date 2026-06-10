@@ -49,6 +49,7 @@ We benchmarked the cache metadata operations (checking, writing, and deleting ca
 * **High Performance:** Powered by `hive_ce` for instant cache lookups.
 * **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
 * **True Web Support:** Unlike the original package, CE provides **full, persistent image caching** on the Web via IndexedDB (`hive_ce`), completely avoiding RAM freezes by using native image decoding sizes.
+* **Interceptors:** Full HTTP and cache interceptor chains — add auth headers, inject synthetic responses, or selectively skip caching without forking the package.
 
 ## 📦 Installation
 
@@ -159,6 +160,75 @@ CachedNetworkImage(
 
 Note: Using `HttpGet` on Web disables the browser's default image caching
 mechanisms, so images are cached via the `cache_manager` instead.
+
+### HTTP Interceptors
+
+Intercept and modify HTTP requests, responses, and errors before they reach the cache layer.
+Useful for adding auth headers, logging, retrying, or short-circuiting with a synthetic response.
+
+```dart
+import 'package:cached_network_image_ce/cached_network_image.dart';
+
+class AuthInterceptor extends HttpInterceptor {
+  final String token;
+  const AuthInterceptor(this.token);
+
+  @override
+  void onRequest(HttpRequestData request, HttpRequestHandler handler) {
+    request.headers['Authorization'] = 'Bearer $token';
+    handler.next(request); // pass (possibly mutated) request to next interceptor
+  }
+}
+
+final manager = DefaultCacheManager(
+  httpInterceptors: [AuthInterceptor('my-token')],
+);
+```
+
+Each hook must call exactly one of `handler.next`, `handler.resolve`, or `handler.reject`.
+Failing to call any will stall the pipeline permanently.
+
+| Hook | Trigger | Handler methods |
+| :--- | :--- | :--- |
+| `onRequest` | Before HTTP call | `next(request)` · `resolve(response)` · `reject(error)` |
+| `onResponse` | After HTTP response received | `next(response)` · `resolve(response)` · `reject(error)` |
+| `onError` | HTTP call threw | `next(error, st)` · `resolve(response)` · `reject(error)` |
+
+### Cache Interceptors
+
+Intercept cache hit, miss, and store events to control how entries are read from and written to
+the cache index. Only available on native IO targets (Android, iOS, macOS, Linux, Windows) — not
+available on web.
+
+```dart
+import 'package:cached_network_image_ce/cached_network_image.dart';
+
+// Reject storage for specific URLs (e.g. private/sensitive images).
+class PrivateImageInterceptor extends CacheInterceptor {
+  @override
+  void onStore(CacheStoreData data, CacheStoreHandler handler) {
+    if (data.url.contains('/private/')) {
+      handler.reject(); // skip writing to Hive; file is delivered then deleted
+    } else {
+      handler.next(data);
+    }
+  }
+}
+
+final manager = DefaultCacheManager(
+  cacheInterceptors: [PrivateImageInterceptor()],
+);
+```
+
+| Hook | Trigger | Handler methods |
+| :--- | :--- | :--- |
+| `onHit` | Cached entry found and valid | `next(data)` · `resolve(fileInfo)` · `reject` (force re-download) |
+| `onMiss` | No cached entry found | `next(data)` · `resolve(fileInfo)` (skip download entirely) |
+| `onStore` | After download, before writing metadata | `next(data)` · `reject` (skip persisting; cache file deleted) |
+
+When `onStore` rejects, the downloaded file is copied to a system-temp location, the
+cache-directory copy is deleted (no orphan), and the temp copy is yielded to the caller for
+this request only.
 
 ### SVG Support
 

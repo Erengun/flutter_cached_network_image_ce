@@ -28,6 +28,10 @@ class CacheMissData {
 }
 
 /// Data passed to [CacheInterceptor.onStore].
+///
+/// Note: [file] is a `dart:io` [File]. This class is only available on
+/// native IO platforms (Android, iOS, macOS, Linux, Windows). It is not
+/// available on web.
 class CacheStoreData {
   const CacheStoreData({
     required this.url,
@@ -54,6 +58,9 @@ class CacheHitHandler {
   void resolve(FileInfo fileInfo) => _onResolve(fileInfo);
 
   /// Force a re-download by treating this hit as a miss.
+  ///
+  /// After rejection, the cache miss path runs (including [CacheInterceptor.onMiss]),
+  /// and a fresh download is initiated.
   void reject() => _onReject();
 }
 
@@ -84,6 +91,9 @@ class CacheStoreHandler {
 }
 
 /// Abstract interceptor for cache lookup and storage events.
+///
+/// This interceptor is specific to the IO [DefaultCacheManager] and is
+/// not available on web targets.
 ///
 /// Override any hook you need; all default to passing through unchanged.
 abstract class CacheInterceptor {

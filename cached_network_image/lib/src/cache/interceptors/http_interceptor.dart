@@ -1,6 +1,11 @@
 import 'package:http/http.dart' as http;
 
 /// Mutable request data passed through the HTTP interceptor chain.
+///
+/// Interceptors may mutate [url] and [headers] in-place, or replace them
+/// entirely before calling [HttpRequestHandler.next]. Once [next] is called,
+/// further mutations to this object have no effect on subsequent interceptors —
+/// the chain runner passes the value at the time [next] was called.
 class HttpRequestData {
   HttpRequestData({required this.url, required this.headers});
 
@@ -33,6 +38,10 @@ class HttpRequestHandler {
 }
 
 /// Handler for [HttpInterceptor.onResponse].
+///
+/// Call [next] to pass the response (possibly replaced) to the next interceptor,
+/// [resolve] to short-circuit with a specific response, or [reject] to turn
+/// the response into an error.
 class HttpResponseHandler {
   HttpResponseHandler._(this._onNext, this._onResolve, this._onReject);
 

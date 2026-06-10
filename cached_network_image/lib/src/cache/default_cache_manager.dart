@@ -508,7 +508,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       // Interceptor rejected storage: copy to a temp file for this delivery,
       // then delete the cache-directory copy so nothing is orphaned there.
       final tempPath =
-          '${io.Directory.systemTemp.path}/${filePath.split('/').last}'
+          '${io.Directory.systemTemp.path}/${path.basename(filePath)}'
           '.${DateTime.now().microsecondsSinceEpoch}.nocache';
       await io.File(filePath).copy(tempPath);
       final f = io.File(filePath);

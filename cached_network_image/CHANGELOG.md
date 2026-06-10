@@ -1,3 +1,12 @@
+## [4.7.0] - 2026-06-10
+
+* **Feature:** Added HTTP and cache interceptor support to `DefaultCacheManager`.
+  * `HttpInterceptor` — intercept, mutate, or short-circuit HTTP requests, responses, and errors before they reach the cache layer.
+  * `CacheInterceptor` — intercept cache hit, miss, and store events. Reject a hit to force re-download; resolve a miss to inject a synthetic file; reject a store to skip writing metadata to Hive.
+  * Pass interceptors via the new `httpInterceptors` and `cacheInterceptors` parameters on `DefaultCacheManager`.
+  * `CacheInterceptor` and its handler types are only available on native IO targets; a no-op stub is exported for web.
+  * Full test coverage for all interceptor chain paths.
+
 ## [4.6.4] - 2026-03-24
 
 * **Fix:** Resolve `HiveError` crashes caused by URL string keys exceeding 255 characters. Long cache keys are now automatically hashed using SHA-256 to remain under Hive's 255-character length limit.

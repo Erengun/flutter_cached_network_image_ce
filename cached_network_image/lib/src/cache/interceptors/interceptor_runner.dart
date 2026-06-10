@@ -1,3 +1,8 @@
+// IMPORTANT: Each runner requires every interceptor to call exactly one handler
+// method (next, resolve, or reject). Failing to call any method will cause the
+// returned Future to never complete, hanging all downstream callers.
+// This is a programming error in the interceptor implementation.
+
 import 'dart:async';
 
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
@@ -131,7 +136,7 @@ Future<HttpErrorOutcome> runOnErrorChain(
     try {
       interceptors[index].onError(err, st, handler);
     } catch (e, s) {
-      if (!completer.isCompleted) completer.complete(HttpErrorRethrow(e, s));
+      if (!completer.isCompleted) completer.completeError(e, s);
     }
   }
 

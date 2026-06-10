@@ -41,9 +41,10 @@ class HttpRequestHandler {
 
 /// Handler for [HttpInterceptor.onResponse].
 ///
-/// Call [next] to pass the response (possibly replaced) to the next interceptor,
-/// [resolve] to short-circuit with a specific response, or [reject] to turn
-/// the response into an error.
+/// Call [next] to pass the response to the next interceptor in the chain
+/// (possibly replacing it with a different response), [resolve] to skip
+/// all remaining interceptors and return this response immediately, or
+/// [reject] to convert the response into an error.
 ///
 /// `.create()` is for internal use by the package only.
 class HttpResponseHandler {
@@ -84,6 +85,10 @@ class HttpErrorHandler {
 /// - [next]: pass (possibly mutated) data to the next interceptor
 /// - [resolve]: short-circuit the chain with a synthetic response
 /// - [reject]: short-circuit the chain with an error
+///
+/// Each hook MUST call exactly one of [handler.next], [handler.resolve], or
+/// [handler.reject]. Failing to call any method will permanently stall the
+/// request pipeline.
 abstract class HttpInterceptor {
   const HttpInterceptor();
 

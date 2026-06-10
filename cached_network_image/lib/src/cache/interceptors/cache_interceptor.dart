@@ -102,6 +102,10 @@ class CacheStoreHandler {
 /// not available on web targets.
 ///
 /// Override any hook you need; all default to passing through unchanged.
+///
+/// Each hook MUST call exactly one of [handler.next], [handler.resolve], or
+/// [handler.reject]. Failing to call any method will permanently stall the
+/// request pipeline.
 abstract class CacheInterceptor {
   const CacheInterceptor();
 

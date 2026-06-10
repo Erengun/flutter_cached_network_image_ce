@@ -24,8 +24,10 @@ class HttpResponseData {
 /// Handler for [HttpInterceptor.onRequest].
 ///
 /// Call exactly one of [next], [resolve], or [reject].
+///
+/// `.create()` is for internal use by the package only.
 class HttpRequestHandler {
-  HttpRequestHandler._(this._onNext, this._onResolve, this._onReject);
+  HttpRequestHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(HttpRequestData) _onNext;
   final void Function(HttpResponseData) _onResolve;
@@ -42,8 +44,10 @@ class HttpRequestHandler {
 /// Call [next] to pass the response (possibly replaced) to the next interceptor,
 /// [resolve] to short-circuit with a specific response, or [reject] to turn
 /// the response into an error.
+///
+/// `.create()` is for internal use by the package only.
 class HttpResponseHandler {
-  HttpResponseHandler._(this._onNext, this._onResolve, this._onReject);
+  HttpResponseHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(HttpResponseData) _onNext;
   final void Function(HttpResponseData) _onResolve;
@@ -56,8 +60,10 @@ class HttpResponseHandler {
 }
 
 /// Handler for [HttpInterceptor.onError].
+///
+/// `.create()` is for internal use by the package only.
 class HttpErrorHandler {
-  HttpErrorHandler._(this._onNext, this._onResolve, this._onReject);
+  HttpErrorHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(Object, StackTrace) _onNext;
   final void Function(HttpResponseData) _onResolve;

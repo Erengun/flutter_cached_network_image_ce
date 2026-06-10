@@ -67,7 +67,10 @@ Future<HttpRequestOutcome> runOnRequestChain(
       return;
     }
     final handler = HttpRequestHandler.create(
-      (next) => run(index + 1, next),
+      (next) => run(
+        index + 1,
+        HttpRequestData(url: next.url, headers: Map.of(next.headers)),
+      ),
       (response) => completer.complete(HttpRequestResolved(response)),
       (err, st) => completer.completeError(err, st ?? StackTrace.current),
     );
@@ -130,8 +133,8 @@ Future<HttpErrorOutcome> runOnErrorChain(
     final handler = HttpErrorHandler.create(
       (nextErr, nextSt) => run(index + 1, nextErr, nextSt),
       (response) => completer.complete(HttpErrorResolved(response)),
-      (newErr, newSt) =>
-          completer.complete(HttpErrorRethrow(newErr, newSt ?? StackTrace.current)),
+      (newErr, newSt) => completer
+          .complete(HttpErrorRethrow(newErr, newSt ?? StackTrace.current)),
     );
     try {
       interceptors[index].onError(err, st, handler);

@@ -502,10 +502,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
     if (storeOutcome) {
       await _cacheBox!.put(_sanitizeBoxKey(key), metadata.toMap());
-    } else {
-      // onStore rejected — remove the file so it doesn't accumulate as orphaned data
-      final f = io.File(filePath);
-      if (await f.exists()) await f.delete();
     }
 
     final localFile = const LocalFileSystem().file(filePath);

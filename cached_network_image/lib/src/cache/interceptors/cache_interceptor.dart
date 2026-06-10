@@ -1,6 +1,7 @@
 import 'dart:io' as io;
 
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:meta/meta.dart';
 
 import '../cache_entry_metadata.dart';
 
@@ -50,6 +51,7 @@ class CacheStoreData {
 ///
 /// `.create()` is for internal use by the package only.
 class CacheHitHandler {
+  @internal
   CacheHitHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(CacheHitData) _onNext;
@@ -70,6 +72,7 @@ class CacheHitHandler {
 ///
 /// `.create()` is for internal use by the package only.
 class CacheMissHandler {
+  @internal
   CacheMissHandler.create(this._onNext, this._onResolve);
 
   final void Function(CacheMissData) _onNext;
@@ -85,6 +88,7 @@ class CacheMissHandler {
 ///
 /// `.create()` is for internal use by the package only.
 class CacheStoreHandler {
+  @internal
   CacheStoreHandler.create(this._onNext, this._onReject);
 
   final void Function(CacheStoreData) _onNext;
@@ -109,8 +113,7 @@ class CacheStoreHandler {
 abstract class CacheInterceptor {
   const CacheInterceptor();
 
-  void onHit(CacheHitData data, CacheHitHandler handler) =>
-      handler.next(data);
+  void onHit(CacheHitData data, CacheHitHandler handler) => handler.next(data);
 
   void onMiss(CacheMissData data, CacheMissHandler handler) =>
       handler.next(data);

@@ -1,4 +1,5 @@
 import 'package:http/http.dart' as http;
+import 'package:meta/meta.dart';
 
 /// Mutable request data passed through the HTTP interceptor chain.
 ///
@@ -33,6 +34,7 @@ class HttpResponseData {
 ///
 /// `.create()` is for internal use by the package only.
 class HttpRequestHandler {
+  @internal
   HttpRequestHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(HttpRequestData) _onNext;
@@ -54,6 +56,7 @@ class HttpRequestHandler {
 ///
 /// `.create()` is for internal use by the package only.
 class HttpResponseHandler {
+  @internal
   HttpResponseHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(HttpResponseData) _onNext;
@@ -70,6 +73,7 @@ class HttpResponseHandler {
 ///
 /// `.create()` is for internal use by the package only.
 class HttpErrorHandler {
+  @internal
   HttpErrorHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(Object, StackTrace) _onNext;

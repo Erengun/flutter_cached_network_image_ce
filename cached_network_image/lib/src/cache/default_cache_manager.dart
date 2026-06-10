@@ -17,6 +17,9 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'cache_entry_metadata.dart';
+import 'interceptors/cache_interceptor.dart';
+import 'interceptors/http_interceptor.dart';
+import 'interceptors/interceptor_runner.dart';
 
 export 'cache_entry_metadata.dart';
 
@@ -58,9 +61,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
     CacheDirectoryProvider? cacheDirectoryProvider,
+    List<HttpInterceptor> httpInterceptors = const [],
+    List<CacheInterceptor> cacheInterceptors = const [],
   })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
         _cacheDirectoryProvider =
-            cacheDirectoryProvider ?? getTemporaryDirectory;
+            cacheDirectoryProvider ?? getTemporaryDirectory,
+        _httpInterceptors = httpInterceptors,
+        _cacheInterceptors = cacheInterceptors;
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
@@ -79,6 +86,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Provider for the base cache directory.
   final CacheDirectoryProvider _cacheDirectoryProvider;
+
+  /// HTTP interceptors that run for every download.
+  final List<HttpInterceptor> _httpInterceptors;
+
+  /// Cache interceptors that run on hit, miss, and store events.
+  final List<CacheInterceptor> _cacheInterceptors;
 
   /// Private Hive instance to avoid conflicts with the host app's global
   /// [Hive] singleton. Each [DefaultCacheManager] gets its own isolated
@@ -246,8 +259,20 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     try {
       cachedFile = await getFileFromCache(key);
       if (cachedFile != null) {
-        controller.add(cachedFile);
-        withProgress = false;
+        final isExpired = cachedFile.validTill.isBefore(DateTime.now());
+        final hitOutcome = await runOnHitChain(
+          _cacheInterceptors,
+          CacheHitData(fileInfo: cachedFile, key: key, isExpired: isExpired),
+        );
+        if (hitOutcome is CacheHitReturn) {
+          cachedFile = hitOutcome.fileInfo;
+          controller.add(cachedFile);
+          withProgress = false;
+        } else {
+          // CacheHitRejected — treat as a miss, force re-download.
+          // withProgress stays as-is so progress events fire during re-download.
+          cachedFile = null;
+        }
       }
     } on Object catch (e) {
       cacheLogger.log(
@@ -257,6 +282,18 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     if (cachedFile == null || cachedFile.validTill.isBefore(DateTime.now())) {
+      if (cachedFile == null) {
+        // Run onMiss chain — interceptor may provide a synthetic response
+        final syntheticFile = await runOnMissChain(
+          _cacheInterceptors,
+          CacheMissData(key: key, url: url),
+        );
+        if (syntheticFile != null) {
+          controller.add(syntheticFile);
+          await controller.close();
+          return;
+        }
+      }
       try {
         await for (final response
             in _downloadFile(url, key, headers, withProgress)) {
@@ -299,121 +336,180 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       CacheManagerLogLevel.verbose,
     );
 
-    final request = http.Request('GET', Uri.parse(url));
-    if (headers != null) {
-      request.headers.addAll(headers);
+    // Splice 1: run onRequest chain — may mutate url/headers or short-circuit
+    final reqData = HttpRequestData(
+      url: url,
+      headers: Map<String, String>.from(headers ?? {}),
+    );
+    final reqOutcome = await runOnRequestChain(_httpInterceptors, reqData);
+    if (reqOutcome is HttpRequestResolved) {
+      // An interceptor short-circuited: skip client.send() entirely
+      yield* _processResponse(url, key, withProgress, reqOutcome.response);
+      return;
     }
 
+    final proceed = reqOutcome as HttpRequestProceed;
     final client = _httpClientFactory();
     try {
+      final request = http.Request('GET', Uri.parse(proceed.data.url));
+      if (proceed.data.headers.isNotEmpty) {
+        request.headers.addAll(proceed.data.headers);
+      }
+
       final connectionTimeout = connectionParameters?.connectionTimeout;
-      final response = connectionTimeout != null
+      final rawResponse = connectionTimeout != null
           ? await client.send(request).timeout(connectionTimeout)
           : await client.send(request);
 
-      if (response.statusCode != 200 && response.statusCode != 202) {
-        throw HttpExceptionWithStatus(
-          response.statusCode,
-          'Invalid statusCode: ${response.statusCode}',
-          uri: Uri.parse(url),
-        );
+      // Splice 2: run onResponse chain — interceptors may replace the response
+      final processedRes = await runOnResponseChain(
+        _httpInterceptors,
+        HttpResponseData(response: rawResponse, originalUrl: url),
+      );
+
+      // _processResponse reads the stream; client must remain open until done
+      yield* _processResponse(url, key, withProgress, processedRes);
+    } catch (e, st) {
+      // Splice 3: run onError chain for all errors (network, status, stream)
+      final errorOutcome = await runOnErrorChain(_httpInterceptors, e, st);
+      if (errorOutcome is HttpErrorResolved) {
+        yield* _processResponse(url, key, withProgress, errorOutcome.response);
+        return;
       }
+      final rethrow_ = errorOutcome as HttpErrorRethrow;
+      Error.throwWithStackTrace(rethrow_.error, rethrow_.stackTrace);
+    } finally {
+      // client.close() runs after the stream is consumed (normal path) or on error
+      client.close();
+    }
+  }
 
-      final contentLength = response.contentLength;
-      final fileExtension = _getFileExtensionFromUrl(url);
-      final relativePath = _generateRelativePath(key, fileExtension);
-      final filePath = _cacheFilePath(relativePath);
+  /// Processes an [HttpResponseData] into cached [FileResponse] events.
+  ///
+  /// Shared by the normal download path, onRequest-resolve short-circuit,
+  /// and onError-resolve recovery path.
+  Stream<FileResponse> _processResponse(
+    String url,
+    String key,
+    bool withProgress,
+    HttpResponseData resData,
+  ) async* {
+    final response = resData.response;
 
-      await _ensureCacheDirectoryExists();
+    if (response.statusCode != 200 && response.statusCode != 202) {
+      throw HttpExceptionWithStatus(
+        response.statusCode,
+        'Invalid statusCode: ${response.statusCode}',
+        uri: Uri.parse(url),
+      );
+    }
 
-      final tempFilePath =
-          '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
-      final tempFile = io.File(tempFilePath);
-      final sink = tempFile.openWrite();
+    final contentLength = response.contentLength;
+    final fileExtension = _getFileExtensionFromUrl(url);
+    final relativePath = _generateRelativePath(key, fileExtension);
+    final filePath = _cacheFilePath(relativePath);
 
-      final requestTimeout = connectionParameters?.requestTimeout;
-      final stream = requestTimeout != null
-          ? response.stream.timeout(requestTimeout)
-          : response.stream;
+    await _ensureCacheDirectoryExists();
 
-      var receivedBytes = 0;
-      var movedToFinalPath = false;
-      try {
-        await for (final chunk in stream) {
-          receivedBytes += chunk.length;
-          sink.add(chunk);
-          if (withProgress) {
-            yield DownloadProgress(url, contentLength, receivedBytes);
-          }
+    final tempFilePath =
+        '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
+    final tempFile = io.File(tempFilePath);
+    final sink = tempFile.openWrite();
+
+    final requestTimeout = connectionParameters?.requestTimeout;
+    final stream = requestTimeout != null
+        ? response.stream.timeout(requestTimeout)
+        : response.stream;
+
+    var receivedBytes = 0;
+    var movedToFinalPath = false;
+    try {
+      await for (final chunk in stream) {
+        receivedBytes += chunk.length;
+        sink.add(chunk);
+        if (withProgress) {
+          yield DownloadProgress(url, contentLength, receivedBytes);
         }
-        await sink.flush();
-        await sink.close();
+      }
+      await sink.flush();
+      await sink.close();
 
-        final finalFile = io.File(filePath);
+      final finalFile = io.File(filePath);
+      try {
+        await tempFile.rename(filePath);
+        movedToFinalPath = true;
+      } on Object catch (_) {
+        io.File? backupFile;
         try {
+          if (await finalFile.exists()) {
+            final backupPath =
+                '$filePath.${DateTime.now().microsecondsSinceEpoch}.bak';
+            backupFile = await finalFile.rename(backupPath);
+          }
+
           await tempFile.rename(filePath);
           movedToFinalPath = true;
         } on Object catch (_) {
-          io.File? backupFile;
-          try {
-            if (await finalFile.exists()) {
-              final backupPath =
-                  '$filePath.${DateTime.now().microsecondsSinceEpoch}.bak';
-              backupFile = await finalFile.rename(backupPath);
-            }
-
-            await tempFile.rename(filePath);
-            movedToFinalPath = true;
-          } on Object catch (_) {
-            if (backupFile != null && await backupFile.exists()) {
-              if (await finalFile.exists()) {
-                await finalFile.delete();
-              }
-              await backupFile.rename(filePath);
-            }
-            rethrow;
-          }
-
           if (backupFile != null && await backupFile.exists()) {
-            try {
-              await backupFile.delete();
-            } on Object catch (e) {
-              cacheLogger.log(
-                'CacheManager: Failed to delete backup file for $filePath with error:\n$e',
-                CacheManagerLogLevel.warning,
-              );
+            if (await finalFile.exists()) {
+              await finalFile.delete();
             }
+            await backupFile.rename(filePath);
           }
+          rethrow;
         }
-      } on Object catch (_) {
-        await sink.close();
-        rethrow;
-      } finally {
-        if (!movedToFinalPath && await tempFile.exists()) {
-          await tempFile.delete();
+
+        if (backupFile != null && await backupFile.exists()) {
+          try {
+            await backupFile.delete();
+          } on Object catch (e) {
+            cacheLogger.log(
+              'CacheManager: Failed to delete backup file for $filePath with error:\n$e',
+              CacheManagerLogLevel.warning,
+            );
+          }
         }
       }
-
-      // Store metadata in Hive
-      final validTill = DateTime.now().add(stalePeriod);
-      final cacheHeaders = response.headers;
-      final eTag = cacheHeaders['etag'];
-
-      await _cacheBox!.put(
-          _sanitizeBoxKey(key),
-          CacheEntryMetadata(
-            url: url,
-            relativePath: relativePath,
-            validTill: validTill,
-            eTag: eTag,
-            length: receivedBytes,
-          ).toMap());
-
-      final localFile = const LocalFileSystem().file(filePath);
-      yield FileInfo(localFile, FileSource.Online, validTill, url);
+    } on Object catch (_) {
+      await sink.close();
+      rethrow;
     } finally {
-      client.close();
+      if (!movedToFinalPath && await tempFile.exists()) {
+        await tempFile.delete();
+      }
     }
+
+    // Store metadata in Hive
+    final validTill = DateTime.now().add(stalePeriod);
+    final cacheHeaders = response.headers;
+    final eTag = cacheHeaders['etag'];
+
+    final metadata = CacheEntryMetadata(
+      url: url,
+      relativePath: relativePath,
+      validTill: validTill,
+      eTag: eTag,
+      length: receivedBytes,
+    );
+    final storeOutcome = await runOnStoreChain(
+      _cacheInterceptors,
+      CacheStoreData(
+        url: url,
+        key: key,
+        metadata: metadata,
+        file: io.File(filePath),
+      ),
+    );
+    if (storeOutcome) {
+      await _cacheBox!.put(_sanitizeBoxKey(key), metadata.toMap());
+    } else {
+      // onStore rejected — remove the file so it doesn't accumulate as orphaned data
+      final f = io.File(filePath);
+      if (await f.exists()) await f.delete();
+    }
+
+    final localFile = const LocalFileSystem().file(filePath);
+    yield FileInfo(localFile, FileSource.Online, validTill, url);
   }
 
   @override

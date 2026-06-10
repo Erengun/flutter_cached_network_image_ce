@@ -47,8 +47,10 @@ class CacheStoreData {
 }
 
 /// Handler for [CacheInterceptor.onHit].
+///
+/// `.create()` is for internal use by the package only.
 class CacheHitHandler {
-  CacheHitHandler._(this._onNext, this._onResolve, this._onReject);
+  CacheHitHandler.create(this._onNext, this._onResolve, this._onReject);
 
   final void Function(CacheHitData) _onNext;
   final void Function(FileInfo) _onResolve;
@@ -65,8 +67,10 @@ class CacheHitHandler {
 }
 
 /// Handler for [CacheInterceptor.onMiss].
+///
+/// `.create()` is for internal use by the package only.
 class CacheMissHandler {
-  CacheMissHandler._(this._onNext, this._onResolve);
+  CacheMissHandler.create(this._onNext, this._onResolve);
 
   final void Function(CacheMissData) _onNext;
   final void Function(FileInfo) _onResolve;
@@ -78,8 +82,10 @@ class CacheMissHandler {
 }
 
 /// Handler for [CacheInterceptor.onStore].
+///
+/// `.create()` is for internal use by the package only.
 class CacheStoreHandler {
-  CacheStoreHandler._(this._onNext, this._onReject);
+  CacheStoreHandler.create(this._onNext, this._onReject);
 
   final void Function(CacheStoreData) _onNext;
   final void Function() _onReject;

@@ -179,6 +179,39 @@ class _PassThroughCacheInterceptor extends CacheInterceptor {
   const _PassThroughCacheInterceptor();
 }
 
+// ── Minimal tracking interceptors ─────────────────────────────────────────────
+
+class _CallTrackingInterceptor extends HttpInterceptor {
+  final void Function() onCalled;
+  _CallTrackingInterceptor(this.onCalled);
+
+  @override
+  void onRequest(HttpRequestData req, HttpRequestHandler handler) {
+    onCalled();
+    handler.next(req);
+  }
+}
+
+class _CallTrackingResponseInterceptor extends HttpInterceptor {
+  final void Function() onCalled;
+  _CallTrackingResponseInterceptor(this.onCalled);
+
+  @override
+  void onResponse(HttpResponseData resp, HttpResponseHandler handler) {
+    onCalled();
+    handler.next(resp);
+  }
+}
+
+class _ThrowingRequestInterceptor extends HttpInterceptor {
+  final Object error;
+  _ThrowingRequestInterceptor(this.error);
+
+  @override
+  void onRequest(HttpRequestData req, HttpRequestHandler handler) =>
+      throw error;
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
@@ -231,6 +264,14 @@ void main() {
       final error = Exception('request rejected');
       await expectLater(
         runOnRequestChain([_RejectRequestInterceptor(error)], _request()),
+        throwsA(same(error)),
+      );
+    });
+
+    test('synchronous throw in interceptor propagates as future error', () async {
+      final error = Exception('sync throw');
+      await expectLater(
+        runOnRequestChain([_ThrowingRequestInterceptor(error)], _request()),
         throwsA(same(error)),
       );
     });
@@ -364,6 +405,15 @@ void main() {
       final result = await runOnHitChain([_RejectHitInterceptor()], _hitData());
       expect(result, isA<CacheHitRejected>());
     });
+
+    test('two interceptors: first passes through, second rejects → returns CacheHitRejected',
+        () async {
+      final result = await runOnHitChain(
+        [const _PassThroughCacheInterceptor(), _RejectHitInterceptor()],
+        _hitData(),
+      );
+      expect(result, isA<CacheHitRejected>());
+    });
   });
 
   // ── runOnMissChain ─────────────────────────────────────────────────────────
@@ -406,29 +456,13 @@ void main() {
       final result = await runOnStoreChain([_RejectStoreInterceptor()], _storeData());
       expect(result, isFalse);
     });
+
+    test('two interceptors: first passes through, second rejects → returns false', () async {
+      final result = await runOnStoreChain(
+        [const _PassThroughCacheInterceptor(), _RejectStoreInterceptor()],
+        _storeData(),
+      );
+      expect(result, isFalse);
+    });
   });
-}
-
-// ── Minimal tracking interceptors ─────────────────────────────────────────────
-
-class _CallTrackingInterceptor extends HttpInterceptor {
-  final void Function() onCalled;
-  _CallTrackingInterceptor(this.onCalled);
-
-  @override
-  void onRequest(HttpRequestData req, HttpRequestHandler handler) {
-    onCalled();
-    handler.next(req);
-  }
-}
-
-class _CallTrackingResponseInterceptor extends HttpInterceptor {
-  final void Function() onCalled;
-  _CallTrackingResponseInterceptor(this.onCalled);
-
-  @override
-  void onResponse(HttpResponseData resp, HttpResponseHandler handler) {
-    onCalled();
-    handler.next(resp);
-  }
 }

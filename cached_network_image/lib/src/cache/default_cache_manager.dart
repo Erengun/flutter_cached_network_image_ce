@@ -17,6 +17,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'cache_entry_metadata.dart';
+import 'cleanup_strategy.dart';
 import 'interceptors/cache_interceptor.dart';
 import 'interceptors/http_interceptor.dart';
 import 'interceptors/interceptor_runner.dart';
@@ -63,11 +64,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     CacheDirectoryProvider? cacheDirectoryProvider,
     List<HttpInterceptor> httpInterceptors = const [],
     List<CacheInterceptor> cacheInterceptors = const [],
+    CleanupStrategy? cleanupStrategy,
   })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getTemporaryDirectory,
         _httpInterceptors = httpInterceptors,
-        _cacheInterceptors = cacheInterceptors;
+        _cacheInterceptors = cacheInterceptors,
+        _cleanupStrategy = cleanupStrategy ?? TtlCleanupStrategy();
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
@@ -92,6 +95,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Cache interceptors that run on hit, miss, and store events.
   final List<CacheInterceptor> _cacheInterceptors;
+
+  /// Strategy that determines the eviction order when the cache is over capacity.
+  final CleanupStrategy _cleanupStrategy;
 
   /// Private Hive instance to avoid conflicts with the host app's global
   /// [Hive] singleton. Each [DefaultCacheManager] gets its own isolated
@@ -676,12 +682,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<void> _cleanupOldFiles() async {
     try {
       final now = DateTime.now();
-      final entries = <MapEntry<dynamic, CacheEntryMetadata>>[];
+      final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
       for (final key in _cacheBox!.keys.toList()) {
         final raw = _cacheBox!.get(key);
         if (raw != null) {
-          entries.add(MapEntry(key, CacheEntryMetadata.fromMap(raw)));
+          entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
         }
       }
 
@@ -698,10 +704,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       // If cache is still too large, remove oldest entries
       if (_cacheBox!.length > maxNrOfCacheObjects) {
-        final sortedEntries = entries
-            .where((e) => _cacheBox!.containsKey(e.key))
-            .toList()
-          ..sort((a, b) => a.value.validTill.compareTo(b.value.validTill));
+        final sortedEntries = _cleanupStrategy.sortForEviction(
+          entries.where((e) => _cacheBox!.containsKey(e.key)).toList(),
+        );
 
         final toRemove = sortedEntries.length - maxNrOfCacheObjects;
         for (var i = 0; i < toRemove; i++) {

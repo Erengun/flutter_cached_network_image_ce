@@ -70,7 +70,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
             cacheDirectoryProvider ?? getTemporaryDirectory,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
-        _cleanupStrategy = cleanupStrategy ?? TtlCleanupStrategy();
+        _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;

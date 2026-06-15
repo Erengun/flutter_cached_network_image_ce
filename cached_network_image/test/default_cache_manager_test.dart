@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io' as io;
 
+import 'package:cached_network_image_ce/cached_network_image.dart'
+    show LruCleanupStrategy, TtlCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:flutter/services.dart';
@@ -1736,6 +1738,324 @@ void main() {
       await manager.removeFile(longKey);
       final cachedAfterRemove = await manager.getFileFromCache(longKey);
       expect(cachedAfterRemove, isNull);
+
+      await manager.emptyCache();
+      await manager.dispose();
+    });
+  });
+
+  // ---- touchedAt field behavior ----
+
+  group('DefaultCacheManager touchedAt', () {
+    test('putFile creates entry with non-null touchedAt', () async {
+      final dir = io.Directory.systemTemp.createTempSync('touched_put_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+      );
+      const url = 'https://example.com/touch-put.bin';
+      await manager.putFile(url, [1, 2, 3], fileExtension: 'bin');
+      await manager.dispose();
+
+      // Read raw Hive entry to inspect touchedAt
+      final hivePath = '${dir.path}/cached_network_image_ce/hive';
+      final hive = HiveImpl();
+      final box =
+          await hive.openBox<Map>('cached_network_image_cache', path: hivePath);
+      final raw = box.get(url) as Map?;
+      await box.close();
+      await hive.close();
+
+      expect(raw, isNotNull);
+      expect(raw!['touchedAt'], isNotNull);
+    });
+
+    test('getFileFromCache updates touchedAt to a more recent time', () async {
+      final dir = io.Directory.systemTemp.createTempSync('touched_get_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+      );
+      const url = 'https://example.com/touch-get.bin';
+      await manager.putFile(url, [1, 2, 3], fileExtension: 'bin');
+      await manager.dispose();
+
+      // Read initial touchedAt
+      final hivePath = '${dir.path}/cached_network_image_ce/hive';
+      final hive1 = HiveImpl();
+      final box1 = await hive1.openBox<Map>(
+        'cached_network_image_cache',
+        path: hivePath,
+      );
+      final raw1 = box1.get(url) as Map?;
+      final t0 = raw1!['touchedAt'] as int;
+      await box1.close();
+      await hive1.close();
+
+      // Wait to ensure time advances
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Access the file — triggers unawaited _touchEntry
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+      );
+      await manager2.getFileFromCache(url);
+      // Pump the event loop to let the fire-and-forget write complete
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await manager2.dispose();
+
+      // Read updated touchedAt
+      final hive2 = HiveImpl();
+      final box2 = await hive2.openBox<Map>(
+        'cached_network_image_cache',
+        path: hivePath,
+      );
+      final raw2 = box2.get(url) as Map?;
+      final t1 = raw2!['touchedAt'] as int;
+      await box2.close();
+      await hive2.close();
+
+      expect(t1, greaterThan(t0));
+    });
+  });
+
+  // ---- LRU / TTL cleanup strategy tests ----
+
+  group('LRU cleanup', () {
+    test('LruCleanupStrategy evicts least-recently-accessed entries', () async {
+      final dir = io.Directory.systemTemp.createTempSync('lru_cleanup_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      // Step 1: Add 5 entries with comfortably-future expiry
+      final manager1 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      final keys = ['lru-a', 'lru-b', 'lru-c', 'lru-d', 'lru-e'];
+      for (final k in keys) {
+        await manager1.putFile(
+          'https://example.com/$k.bin',
+          [1, 2, 3],
+          key: k,
+          fileExtension: 'bin',
+          maxAge: const Duration(hours: 1),
+        );
+      }
+
+      // Wait to ensure time advances past initial touchedAt values
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Step 2: Access 'lru-a' and 'lru-c' — update their touchedAt
+      await manager1.getFileFromCache('lru-a');
+      await manager1.getFileFromCache('lru-c');
+
+      // Wait for fire-and-forget _touchEntry writes to complete
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      await manager1.dispose();
+
+      // Step 3: Re-create manager — _doInit triggers _cleanupOldFiles
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+
+      // Trigger init and poll until cleanup reduces to ≤ 2
+      await manager2.getFileFromCache('__trigger__');
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final remaining = <String>[];
+        for (final k in keys) {
+          if (await manager2.getFileFromCache(k) != null) remaining.add(k);
+        }
+        if (remaining.length <= 2) break;
+      }
+
+      // 'lru-a' and 'lru-c' were accessed last — they must survive
+      expect(await manager2.getFileFromCache('lru-a'), isNotNull,
+          reason: 'lru-a was recently accessed and should survive');
+      expect(await manager2.getFileFromCache('lru-c'), isNotNull,
+          reason: 'lru-c was recently accessed and should survive');
+      // b, d, e were not accessed — they should be evicted
+      expect(await manager2.getFileFromCache('lru-b'), isNull,
+          reason: 'lru-b was not accessed and should be evicted');
+      expect(await manager2.getFileFromCache('lru-d'), isNull,
+          reason: 'lru-d was not accessed and should be evicted');
+      expect(await manager2.getFileFromCache('lru-e'), isNull,
+          reason: 'lru-e was not accessed and should be evicted');
+
+      await manager2.emptyCache();
+      await manager2.dispose();
+    });
+
+    test('TtlCleanupStrategy evicts earliest-expiring entries first', () async {
+      final dir = io.Directory.systemTemp.createTempSync('ttl_cleanup_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      // Add 5 entries with different but all-future validTill values.
+      // 'ttl-c' and 'ttl-d' have the longest TTL and should survive.
+      final manager1 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const TtlCleanupStrategy(),
+      );
+
+      final entries = [
+        ('ttl-a', const Duration(minutes: 10)),
+        ('ttl-b', const Duration(minutes: 20)),
+        ('ttl-c', const Duration(hours: 10)),
+        ('ttl-d', const Duration(hours: 20)),
+        ('ttl-e', const Duration(minutes: 30)),
+      ];
+      for (final (k, age) in entries) {
+        await manager1.putFile(
+          'https://example.com/$k.bin',
+          [1],
+          key: k,
+          fileExtension: 'bin',
+          maxAge: age,
+        );
+      }
+      await manager1.dispose();
+
+      // Re-initialize to trigger cleanup
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const TtlCleanupStrategy(),
+      );
+
+      await manager2.getFileFromCache('__trigger__');
+      // Poll until cleanup completes
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final count = [
+          for (final (k, _) in entries)
+            if (await manager2.getFileFromCache(k) != null) k,
+        ].length;
+        if (count <= 2) break;
+      }
+
+      // The 2 longest-lived entries survive
+      expect(await manager2.getFileFromCache('ttl-c'), isNotNull,
+          reason: 'ttl-c has 10h TTL and should survive');
+      expect(await manager2.getFileFromCache('ttl-d'), isNotNull,
+          reason: 'ttl-d has 20h TTL and should survive');
+      // The 3 shortest-lived are evicted first
+      expect(await manager2.getFileFromCache('ttl-a'), isNull,
+          reason: 'ttl-a (10m TTL) should be evicted');
+      expect(await manager2.getFileFromCache('ttl-b'), isNull,
+          reason: 'ttl-b (20m TTL) should be evicted');
+      expect(await manager2.getFileFromCache('ttl-e'), isNull,
+          reason: 'ttl-e (30m TTL) should be evicted');
+
+      await manager2.emptyCache();
+      await manager2.dispose();
+    });
+
+    test('LRU cleanup falls back to validTill ordering for legacy null-touchedAt entries',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('lru_legacy_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final hivePath = '${dir.path}/cached_network_image_ce/hive';
+      final cacheFileDir = '${dir.path}/cached_network_image_ce';
+
+      // Create cache directory structure
+      await io.Directory(hivePath).create(recursive: true);
+
+      // Inject legacy entries (no touchedAt) directly into Hive.
+      // We use different validTill so the fallback ordering is deterministic.
+      // Keys are short (<255) so _sanitizeBoxKey is a no-op.
+      final legacyEntries = [
+        ('leg-a', DateTime.now().add(const Duration(minutes: 10))),
+        ('leg-b', DateTime.now().add(const Duration(minutes: 20))),
+        ('leg-c', DateTime.now().add(const Duration(hours: 1))),
+        ('leg-d', DateTime.now().add(const Duration(hours: 2))),
+        ('leg-e', DateTime.now().add(const Duration(hours: 3))),
+      ];
+
+      final injectionHive = HiveImpl();
+      final injectionBox = await injectionHive.openBox<Map>(
+        'cached_network_image_cache',
+        path: hivePath,
+      );
+
+      for (final (k, validTill) in legacyEntries) {
+        // Build map without touchedAt (legacy entry)
+        final meta = CacheEntryMetadata(
+          url: 'https://example.com/$k.bin',
+          relativePath: '$k.bin',
+          validTill: validTill,
+        );
+        final map = meta.toMap(); // touchedAt is null so it's omitted
+        await injectionBox.put(k, map);
+
+        // Create a real file on disk so getFileFromCache doesn't report it missing
+        final file = io.File('$cacheFileDir/$k.bin');
+        await file.create(recursive: true);
+        await file.writeAsBytes([1, 2, 3]);
+      }
+
+      await injectionBox.close();
+      await injectionHive.close();
+
+      // Open manager with LRU strategy and maxNrOfCacheObjects: 2
+      // LRU falls back to effectiveTouchedAt = validTill for null-touchedAt entries
+      // so it behaves like TTL: shortest validTill evicted first.
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+
+      await manager.getFileFromCache('__trigger__');
+      // Poll until cleanup completes
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final count = [
+          for (final (k, _) in legacyEntries)
+            if (await manager.getFileFromCache(k) != null) k,
+        ].length;
+        if (count <= 2) break;
+      }
+
+      // Longest validTill (leg-d, leg-e) survive since effectiveTouchedAt = validTill
+      expect(await manager.getFileFromCache('leg-d'), isNotNull,
+          reason: 'leg-d (2h validTill) should survive as most recently "touched"');
+      expect(await manager.getFileFromCache('leg-e'), isNotNull,
+          reason: 'leg-e (3h validTill) should survive as most recently "touched"');
+      // Shortest validTill entries are evicted
+      expect(await manager.getFileFromCache('leg-a'), isNull,
+          reason: 'leg-a (10m validTill) should be evicted first');
+      expect(await manager.getFileFromCache('leg-b'), isNull,
+          reason: 'leg-b (20m validTill) should be evicted');
+      expect(await manager.getFileFromCache('leg-c'), isNull,
+          reason: 'leg-c (1h validTill) should be evicted');
 
       await manager.emptyCache();
       await manager.dispose();

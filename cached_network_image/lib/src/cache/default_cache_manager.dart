@@ -490,6 +490,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       validTill: validTill,
       eTag: eTag,
       length: receivedBytes,
+      touchedAt: DateTime.now(),
     );
     final storeOutcome = await runOnStoreChain(
       _cacheInterceptors,
@@ -574,6 +575,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           validTill: validTill,
           eTag: eTag,
           length: fileBytes.length,
+          touchedAt: DateTime.now(),
         ).toMap());
 
     return const LocalFileSystem().file(filePath);

@@ -17,6 +17,7 @@ export 'package:cached_network_image_platform_interface_ce/cached_network_image_
         ImageFormatDetector,
         UnsupportedImageFormatException;
 
+export 'src/cache/cleanup_strategy.dart';
 export 'src/cache/default_cache_manager_factory.dart';
 export 'src/cache/interceptors/cache_interceptor.dart'
     if (dart.library.js_interop) 'src/cache/interceptors/cache_interceptor_stub.dart';

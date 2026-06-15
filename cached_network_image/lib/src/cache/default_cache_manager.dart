@@ -551,6 +551,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ///
   /// Fire-and-forget — callers should wrap with [unawaited].
   Future<void> _touchEntry(String key, CacheEntryMetadata metadata) async {
+    // Capture _cacheBox before the first await to guard against a concurrent
+    // dispose() nulling the field while this future is suspended.
+    final box = _cacheBox;
+    if (box == null || !box.isOpen) return;
     final updated = CacheEntryMetadata(
       url: metadata.url,
       relativePath: metadata.relativePath,
@@ -559,7 +563,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       length: metadata.length,
       touchedAt: DateTime.now(),
     );
-    await _cacheBox!.put(_sanitizeBoxKey(key), updated.toMap());
+    try {
+      await box.put(_sanitizeBoxKey(key), updated.toMap());
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Failed to update touchedAt for $key: $e',
+        CacheManagerLogLevel.debug,
+      );
+    }
   }
 
   @override

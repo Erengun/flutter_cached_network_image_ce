@@ -2,6 +2,92 @@ import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('CacheEntryMetadata touchedAt', () {
+    test('toMap includes touchedAt when set', () {
+      final validTill = DateTime(2025, 6, 15);
+      final touchedAt = DateTime(2025, 6, 10, 12, 0, 0);
+      final metadata = CacheEntryMetadata(
+        url: 'https://example.com/image.png',
+        relativePath: 'abc.png',
+        validTill: validTill,
+        touchedAt: touchedAt,
+      );
+
+      final map = metadata.toMap();
+      expect(map.containsKey('touchedAt'), isTrue);
+      expect(map['touchedAt'], touchedAt.millisecondsSinceEpoch);
+    });
+
+    test('toMap omits touchedAt key when null', () {
+      final metadata = CacheEntryMetadata(
+        url: 'https://example.com/image.png',
+        relativePath: 'abc.png',
+        validTill: DateTime(2025, 6, 15),
+      );
+
+      final map = metadata.toMap();
+      expect(map.containsKey('touchedAt'), isFalse);
+    });
+
+    test('toMap/fromMap roundtrip preserves touchedAt', () {
+      final validTill = DateTime(2025, 6, 15);
+      final touchedAt = DateTime(2025, 6, 10, 8, 30, 0);
+      final original = CacheEntryMetadata(
+        url: 'https://example.com/roundtrip.png',
+        relativePath: 'rt.png',
+        validTill: validTill,
+        touchedAt: touchedAt,
+      );
+
+      final reconstructed = CacheEntryMetadata.fromMap(original.toMap());
+
+      expect(
+        reconstructed.touchedAt!.millisecondsSinceEpoch,
+        touchedAt.millisecondsSinceEpoch,
+      );
+    });
+
+    test('fromMap returns null touchedAt for legacy data without touchedAt key',
+        () {
+      final map = {
+        'url': 'https://example.com/legacy.png',
+        'relativePath': 'legacy.png',
+        'validTill': DateTime(2025, 6, 15).millisecondsSinceEpoch,
+        'eTag': null,
+        'length': 0,
+        // no 'touchedAt' key — legacy entry
+      };
+
+      final metadata = CacheEntryMetadata.fromMap(map);
+      expect(metadata.touchedAt, isNull);
+    });
+
+    test('effectiveTouchedAt returns touchedAt when set', () {
+      final validTill = DateTime(2025, 6, 15);
+      final touchedAt = DateTime(2025, 6, 10);
+      final metadata = CacheEntryMetadata(
+        url: 'https://example.com/image.png',
+        relativePath: 'abc.png',
+        validTill: validTill,
+        touchedAt: touchedAt,
+      );
+
+      expect(metadata.effectiveTouchedAt, touchedAt);
+    });
+
+    test('effectiveTouchedAt falls back to validTill when touchedAt is null',
+        () {
+      final validTill = DateTime(2025, 6, 15);
+      final metadata = CacheEntryMetadata(
+        url: 'https://example.com/image.png',
+        relativePath: 'abc.png',
+        validTill: validTill,
+      );
+
+      expect(metadata.effectiveTouchedAt, validTill);
+    });
+  });
+
   group('CacheEntryMetadata', () {
     test('constructor sets all fields', () {
       final validTill = DateTime(2025, 1, 1);

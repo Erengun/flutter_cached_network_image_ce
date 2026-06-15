@@ -542,8 +542,24 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final localFile = const LocalFileSystem().file(filePath);
+    unawaited(_touchEntry(key, metadata));
     return FileInfo(
         localFile, FileSource.Cache, metadata.validTill, metadata.url);
+  }
+
+  /// Updates the [touchedAt] timestamp for [key] in the cache box.
+  ///
+  /// Fire-and-forget — callers should wrap with [unawaited].
+  Future<void> _touchEntry(String key, CacheEntryMetadata metadata) async {
+    final updated = CacheEntryMetadata(
+      url: metadata.url,
+      relativePath: metadata.relativePath,
+      validTill: metadata.validTill,
+      eTag: metadata.eTag,
+      length: metadata.length,
+      touchedAt: DateTime.now(),
+    );
+    await _cacheBox!.put(_sanitizeBoxKey(key), updated.toMap());
   }
 
   @override

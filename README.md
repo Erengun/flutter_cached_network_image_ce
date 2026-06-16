@@ -165,6 +165,24 @@ Available hooks:
 
 > `CacheInterceptor` is not available on web targets.
 
+### Cache Cleanup Strategy
+
+Control which entries are evicted first when the cache exceeds `maxNrOfCacheObjects`:
+
+```dart
+final manager = DefaultCacheManager(
+  maxNrOfCacheObjects: 200,
+  cleanupStrategy: const LruCleanupStrategy(),
+);
+```
+
+| Strategy | Eviction order | Default |
+| :--- | :--- | :--- |
+| `TtlCleanupStrategy` | Soonest-to-expire (`validTill`) first | ✅ |
+| `LruCleanupStrategy` | Least-recently-used (`touchedAt`) first | |
+
+`LruCleanupStrategy` relies on `touchedAt`, which is updated on every cache hit. Legacy entries written before this field existed fall back to `validTill` ordering. Implement `CleanupStrategy` for a custom eviction policy.
+
 ## ❓ FAQ
 
 **Q: Will I lose my users' existing cache if I migrate?**

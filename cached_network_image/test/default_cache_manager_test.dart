@@ -1767,7 +1767,7 @@ void main() {
       final hive = HiveImpl();
       final box =
           await hive.openBox<Map>('cached_network_image_cache', path: hivePath);
-      final raw = box.get(url) as Map?;
+      final raw = box.get(url);
       await box.close();
       await hive.close();
 
@@ -1797,7 +1797,7 @@ void main() {
         'cached_network_image_cache',
         path: hivePath,
       );
-      final raw1 = box1.get(url) as Map?;
+      final raw1 = box1.get(url);
       final t0 = raw1!['touchedAt'] as int;
       await box1.close();
       await hive1.close();
@@ -1820,7 +1820,7 @@ void main() {
         'cached_network_image_cache',
         path: hivePath,
       );
-      final raw2 = box2.get(url) as Map?;
+      final raw2 = box2.get(url);
       final t1 = raw2!['touchedAt'] as int;
       await box2.close();
       await hive2.close();

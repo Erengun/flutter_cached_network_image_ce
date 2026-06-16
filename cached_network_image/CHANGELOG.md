@@ -1,3 +1,12 @@
+## [4.8.0] - 2026-06-16
+
+* **Feature:** Added LRU cache cleanup support to `DefaultCacheManager`.
+  * New `CleanupStrategy` abstraction controls eviction order when the cache exceeds `maxNrOfCacheObjects`.
+  * `TtlCleanupStrategy` — evicts soonest-to-expire entries first. Matches prior behaviour and remains the default.
+  * `LruCleanupStrategy` — evicts least-recently-used entries first, based on a new `touchedAt` timestamp updated on every cache hit.
+  * `CacheEntryMetadata` gains a nullable `touchedAt` field; legacy entries without it fall back to `validTill` via `effectiveTouchedAt`.
+  * Pass a strategy via the new `cleanupStrategy` parameter on `DefaultCacheManager`, or implement `CleanupStrategy` for a custom eviction policy.
+
 ## [4.7.0] - 2026-06-10
 
 * **Feature:** Added HTTP and cache interceptor support to `DefaultCacheManager`.

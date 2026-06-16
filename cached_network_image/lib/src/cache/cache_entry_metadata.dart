@@ -1,5 +1,5 @@
 /// Typed metadata for a cached file entry, stored in Hive.
-class CacheEntryMetadata {
+final class CacheEntryMetadata {
   CacheEntryMetadata({
     required this.url,
     required this.relativePath,

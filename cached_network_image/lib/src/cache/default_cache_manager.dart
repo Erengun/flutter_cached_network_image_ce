@@ -548,29 +548,36 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final localFile = const LocalFileSystem().file(filePath);
-    unawaited(_touchEntry(key, metadata));
+    unawaited(_touchEntry(key));
     return FileInfo(
         localFile, FileSource.Cache, metadata.validTill, metadata.url);
   }
 
   /// Updates the [touchedAt] timestamp for [key] in the cache box.
   ///
-  /// Fire-and-forget — callers should wrap with [unawaited].
-  Future<void> _touchEntry(String key, CacheEntryMetadata metadata) async {
+  /// Re-reads the current entry immediately before writing so a concurrent
+  /// update to other fields (e.g. a re-download) isn't clobbered by a touch
+  /// based on stale metadata. Fire-and-forget — callers should wrap with
+  /// [unawaited].
+  Future<void> _touchEntry(String key) async {
     // Capture _cacheBox before the first await to guard against a concurrent
     // dispose() nulling the field while this future is suspended.
     final box = _cacheBox;
     if (box == null || !box.isOpen) return;
-    final updated = CacheEntryMetadata(
-      url: metadata.url,
-      relativePath: metadata.relativePath,
-      validTill: metadata.validTill,
-      eTag: metadata.eTag,
-      length: metadata.length,
-      touchedAt: DateTime.now(),
-    );
+    final sanitizedKey = _sanitizeBoxKey(key);
     try {
-      await box.put(_sanitizeBoxKey(key), updated.toMap());
+      final raw = box.get(sanitizedKey);
+      if (raw == null) return;
+      final current = CacheEntryMetadata.fromMap(raw);
+      final updated = CacheEntryMetadata(
+        url: current.url,
+        relativePath: current.relativePath,
+        validTill: current.validTill,
+        eTag: current.eTag,
+        length: current.length,
+        touchedAt: DateTime.now(),
+      );
+      await box.put(sanitizedKey, updated.toMap());
     } on Object catch (e) {
       cacheLogger.log(
         'CacheManager: Failed to update touchedAt for $key: $e',

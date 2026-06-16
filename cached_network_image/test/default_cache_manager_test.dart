@@ -1973,7 +1973,8 @@ void main() {
       await manager2.dispose();
     });
 
-    test('LRU cleanup falls back to validTill ordering for legacy null-touchedAt entries',
+    test(
+        'LRU cleanup falls back to validTill ordering for legacy null-touchedAt entries',
         () async {
       final dir = io.Directory.systemTemp.createTempSync('lru_legacy_');
       addTearDown(() {
@@ -2046,9 +2047,11 @@ void main() {
 
       // Longest validTill (leg-d, leg-e) survive since effectiveTouchedAt = validTill
       expect(await manager.getFileFromCache('leg-d'), isNotNull,
-          reason: 'leg-d (2h validTill) should survive as most recently "touched"');
+          reason:
+              'leg-d (2h validTill) should survive as most recently "touched"');
       expect(await manager.getFileFromCache('leg-e'), isNotNull,
-          reason: 'leg-e (3h validTill) should survive as most recently "touched"');
+          reason:
+              'leg-e (3h validTill) should survive as most recently "touched"');
       // Shortest validTill entries are evicted
       expect(await manager.getFileFromCache('leg-a'), isNull,
           reason: 'leg-a (10m validTill) should be evicted first');

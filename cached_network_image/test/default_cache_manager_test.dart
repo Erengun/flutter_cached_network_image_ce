@@ -1832,6 +1832,19 @@ void main() {
   // ---- LRU / TTL cleanup strategy tests ----
 
   group('LRU cleanup', () {
+    // Counts cached `.bin` files on disk without going through
+    // getFileFromCache, which would touch entries and disturb the eviction
+    // order being tested.
+    Future<int> countCachedFiles(io.Directory dir) async {
+      final cacheFileDir = io.Directory('${dir.path}/cached_network_image_ce');
+      if (!await cacheFileDir.exists()) return 0;
+      final entries = await cacheFileDir.list().toList();
+      return entries
+          .whereType<io.File>()
+          .where((f) => f.path.endsWith('.bin'))
+          .length;
+    }
+
     test('LruCleanupStrategy evicts least-recently-accessed entries', () async {
       final dir = io.Directory.systemTemp.createTempSync('lru_cleanup_');
       addTearDown(() {
@@ -1876,15 +1889,12 @@ void main() {
         cleanupStrategy: const LruCleanupStrategy(),
       );
 
-      // Trigger init and poll until cleanup reduces to ≤ 2
+      // Trigger init, then poll the filesystem (not getFileFromCache, which
+      // would touch entries) until cleanup reduces the file count to ≤ 2.
       await manager2.getFileFromCache('__trigger__');
       for (var i = 0; i < 50; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        final remaining = <String>[];
-        for (final k in keys) {
-          if (await manager2.getFileFromCache(k) != null) remaining.add(k);
-        }
-        if (remaining.length <= 2) break;
+        if (await countCachedFiles(dir) <= 2) break;
       }
 
       // 'lru-a' and 'lru-c' were accessed last — they must survive
@@ -1946,14 +1956,10 @@ void main() {
       );
 
       await manager2.getFileFromCache('__trigger__');
-      // Poll until cleanup completes
+      // Poll the filesystem (not getFileFromCache) until cleanup completes
       for (var i = 0; i < 50; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        final count = [
-          for (final (k, _) in entries)
-            if (await manager2.getFileFromCache(k) != null) k,
-        ].length;
-        if (count <= 2) break;
+        if (await countCachedFiles(dir) <= 2) break;
       }
 
       // The 2 longest-lived entries survive
@@ -2035,14 +2041,10 @@ void main() {
       );
 
       await manager.getFileFromCache('__trigger__');
-      // Poll until cleanup completes
+      // Poll the filesystem (not getFileFromCache) until cleanup completes
       for (var i = 0; i < 50; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        final count = [
-          for (final (k, _) in legacyEntries)
-            if (await manager.getFileFromCache(k) != null) k,
-        ].length;
-        if (count <= 2) break;
+        if (await countCachedFiles(dir) <= 2) break;
       }
 
       // Longest validTill (leg-d, leg-e) survive since effectiveTouchedAt = validTill

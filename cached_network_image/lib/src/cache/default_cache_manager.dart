@@ -39,7 +39,7 @@ String _sanitizeBoxKey(String key) {
   return '${key.substring(0, 190)}_$hash';
 }
 
-/// Signature for a function that returns the cache base directory.
+/// Signature for a function that returns a cache base directory.
 ///
 /// Defaults to [getTemporaryDirectory] when not specified.
 typedef CacheDirectoryProvider = Future<io.Directory> Function();
@@ -56,18 +56,24 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ///   Defaults to [getTemporaryDirectory]. Pass [getApplicationSupportDirectory]
   ///   if you need a more persistent location (but note that files may be
   ///   backed up on iOS/Android).
+  /// [metadataDirectoryProvider] allows overriding where Hive metadata is stored.
+  ///   Defaults to [cacheDirectoryProvider] for backwards compatibility.
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
     CacheDirectoryProvider? cacheDirectoryProvider,
+    CacheDirectoryProvider? metadataDirectoryProvider,
     List<HttpInterceptor> httpInterceptors = const [],
     List<CacheInterceptor> cacheInterceptors = const [],
     CleanupStrategy? cleanupStrategy,
   })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getTemporaryDirectory,
+        _metadataDirectoryProvider = metadataDirectoryProvider ??
+            cacheDirectoryProvider ??
+            getTemporaryDirectory,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
         _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
@@ -89,6 +95,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Provider for the base cache directory.
   final CacheDirectoryProvider _cacheDirectoryProvider;
+
+  /// Provider for the base Hive metadata directory.
+  final CacheDirectoryProvider _metadataDirectoryProvider;
 
   /// HTTP interceptors that run for every download.
   final List<HttpInterceptor> _httpInterceptors;
@@ -145,7 +154,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     _cacheDir = path.join(dir.path, 'cached_network_image_ce');
     await io.Directory(_cacheDir!).create(recursive: true);
 
-    final hivePath = path.join(_cacheDir!, 'hive');
+    final metadataDir = await _metadataDirectoryProvider();
+    final hivePath = path.join(
+      metadataDir.path,
+      'cached_network_image_ce',
+      'hive',
+    );
     await io.Directory(hivePath).create(recursive: true);
 
     // Open the box with an explicit path on the private Hive instance.

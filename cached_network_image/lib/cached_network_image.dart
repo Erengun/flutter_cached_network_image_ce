@@ -15,6 +15,7 @@ export 'package:cached_network_image_platform_interface_ce/cached_network_image_
         HttpExceptionWithStatus,
         ImageCacheManager,
         ImageFormatDetector,
+        ImageRenderMethodForWeb,
         UnsupportedImageFormatException;
 
 export 'src/cache/cleanup_strategy.dart';

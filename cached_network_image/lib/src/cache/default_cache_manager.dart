@@ -772,16 +772,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final relativePath = path.relative(entity.path, from: _cacheDir!);
       if (knownRelativePaths.contains(relativePath)) continue;
 
-      io.FileStat stat;
       try {
-        stat = entity.statSync();
-      } on Object {
-        continue;
-      }
-
-      if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
-
-      try {
+        final stat = entity.statSync();
+        if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
         await entity.delete();
       } on Object {
         continue;

@@ -5,8 +5,6 @@ import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart';
-import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart'
-    hide ImageLoader;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';

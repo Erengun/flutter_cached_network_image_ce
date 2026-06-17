@@ -72,9 +72,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getTemporaryDirectory,
-        _metadataDirectoryProvider = metadataDirectoryProvider ??
-            cacheDirectoryProvider ??
-            getTemporaryDirectory,
+        _metadataDirectoryProvider = metadataDirectoryProvider,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
         _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
@@ -98,7 +96,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   final CacheDirectoryProvider _cacheDirectoryProvider;
 
   /// Provider for the base Hive metadata directory.
-  final CacheDirectoryProvider _metadataDirectoryProvider;
+  final CacheDirectoryProvider? _metadataDirectoryProvider;
 
   /// HTTP interceptors that run for every download.
   final List<HttpInterceptor> _httpInterceptors;
@@ -155,7 +153,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     _cacheDir = path.join(dir.path, 'cached_network_image_ce');
     await io.Directory(_cacheDir!).create(recursive: true);
 
-    final metadataDir = await _metadataDirectoryProvider();
+    final metadataDir =
+        await (_metadataDirectoryProvider ?? _cacheDirectoryProvider)();
     final hivePath = path.join(
       metadataDir.path,
       'cached_network_image_ce',

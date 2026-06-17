@@ -145,6 +145,26 @@ On Flutter Web, timeout settings apply when using
 `ImageRenderMethodForWeb.HttpGet`. The `HtmlImage` render method uses the
 browser image pipeline and bypasses the cache manager HTTP path.
 
+### Cache and Metadata Directories
+
+On native IO targets, cached image files and Hive metadata can use separate
+base directories.
+
+```dart
+final cacheManager = DefaultCacheManager(
+  cacheDirectoryProvider: getTemporaryDirectory,
+  metadataDirectoryProvider: getApplicationSupportDirectory,
+);
+```
+
+If `metadataDirectoryProvider` is omitted, metadata stays under the cache
+directory:
+
+```text
+<cacheBase>/cached_network_image_ce/
+<cacheBase>/cached_network_image_ce/hive/
+```
+
 **Web Platform Headers Support:** Custom headers (like `Authorization`) are
 **only supported with `ImageRenderMethodForWeb.HttpGet`**. The default
 `HtmlImage` render method does not support custom headers. If you need to

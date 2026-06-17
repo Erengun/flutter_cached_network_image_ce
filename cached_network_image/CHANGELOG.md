@@ -1,3 +1,7 @@
+## [4.9.0] - 2026-06-17
+
+* **Feature:** Added `metadataDirectoryProvider` to `DefaultCacheManager` so Hive metadata can be stored separately from cached image files on IO platforms.
+
 ## [4.8.0] - 2026-06-16
 
 * **Feature:** Added LRU cache cleanup support to `DefaultCacheManager`.

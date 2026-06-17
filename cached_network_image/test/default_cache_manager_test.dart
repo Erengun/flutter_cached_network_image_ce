@@ -123,8 +123,67 @@ void main() {
           io.Directory('${customDir.path}/cached_network_image_ce');
       expect(cacheSubDir.existsSync(), isTrue);
 
+      final hiveDir =
+          io.Directory('${customDir.path}/cached_network_image_ce/hive');
+      expect(hiveDir.existsSync(), isTrue);
+
       await manager.emptyCache();
       await manager.dispose();
+    });
+
+    test('accepts custom metadataDirectoryProvider', () async {
+      final cacheDir =
+          io.Directory.systemTemp.createTempSync('custom_file_cache_dir_');
+      final metadataDir =
+          io.Directory.systemTemp.createTempSync('custom_metadata_dir_');
+      addTearDown(() {
+        try {
+          cacheDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+        try {
+          metadataDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => cacheDir,
+        metadataDirectoryProvider: () async => metadataDir,
+      );
+
+      await manager.putFile(
+        'https://example.com/custom-metadata-dir.bin',
+        [1, 2, 3],
+        fileExtension: 'bin',
+      );
+
+      final cached = await manager.getFileFromCache(
+        'https://example.com/custom-metadata-dir.bin',
+      );
+      expect(cached, isNotNull);
+      expect(cached!.file.path, contains(cacheDir.path));
+      expect(cached.file.path, isNot(contains(metadataDir.path)));
+
+      final cacheHiveDir =
+          io.Directory('${cacheDir.path}/cached_network_image_ce/hive');
+      expect(cacheHiveDir.existsSync(), isFalse);
+
+      final metadataHiveDir =
+          io.Directory('${metadataDir.path}/cached_network_image_ce/hive');
+      expect(metadataHiveDir.existsSync(), isTrue);
+
+      await manager.dispose();
+
+      final hive = HiveImpl();
+      final box = await hive.openBox<Map>(
+        'cached_network_image_cache',
+        path: metadataHiveDir.path,
+      );
+      expect(
+        box.get('https://example.com/custom-metadata-dir.bin'),
+        isNotNull,
+      );
+      await box.close();
+      await hive.close();
     });
   });
 

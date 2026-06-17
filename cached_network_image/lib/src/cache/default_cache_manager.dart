@@ -28,6 +28,7 @@ const _kBoxName = 'cached_network_image_cache';
 const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
+const _kOrphanFileGracePeriod = Duration(minutes: 5);
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico'];
 
@@ -712,6 +713,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
       }
 
+      await _deleteOrphanedCacheFiles(
+        entries.map((entry) => entry.value.relativePath).toSet(),
+        now,
+      );
+
       // Remove expired entries
       for (final entry in entries) {
         if (entry.value.validTill.isBefore(now)) {
@@ -744,6 +750,32 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         'CacheManager: Error during cleanup: $e',
         CacheManagerLogLevel.warning,
       );
+    }
+  }
+
+  Future<void> _deleteOrphanedCacheFiles(
+    Set<String> knownRelativePaths,
+    DateTime now,
+  ) async {
+    final cacheDir = io.Directory(_cacheDir!);
+    if (!await cacheDir.exists()) return;
+
+    await for (final entity in cacheDir.list()) {
+      if (entity is! io.File) continue;
+
+      final relativePath = path.relative(entity.path, from: _cacheDir!);
+      if (knownRelativePaths.contains(relativePath)) continue;
+
+      io.FileStat stat;
+      try {
+        stat = entity.statSync();
+      } on Object {
+        continue;
+      }
+
+      if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
+
+      await entity.delete();
     }
   }
 

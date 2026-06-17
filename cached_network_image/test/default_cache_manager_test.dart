@@ -764,6 +764,69 @@ void main() {
       await manager2.dispose();
     });
 
+    test('reconciles orphaned cache files with a grace window', () async {
+      final cacheDir =
+          io.Directory.systemTemp.createTempSync('orphan_file_cache_');
+      final metadataDir =
+          io.Directory.systemTemp.createTempSync('orphan_metadata_');
+      addTearDown(() {
+        try {
+          cacheDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+        try {
+          metadataDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => cacheDir,
+        metadataDirectoryProvider: () async => metadataDir,
+      );
+
+      const oldUrl = 'https://example.com/orphan-old.bin';
+      const recentUrl = 'https://example.com/orphan-recent.bin';
+      await manager.putFile(oldUrl, [1, 2, 3], fileExtension: 'bin');
+      await manager.putFile(recentUrl, [4, 5, 6], fileExtension: 'bin');
+
+      final oldCached = await manager.getFileFromCache(oldUrl);
+      final recentCached = await manager.getFileFromCache(recentUrl);
+      expect(oldCached, isNotNull);
+      expect(recentCached, isNotNull);
+
+      final oldFile = oldCached!.file as io.File;
+      final recentFile = recentCached!.file as io.File;
+      await manager.dispose();
+
+      await oldFile.setLastModified(
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      await recentFile.setLastModified(DateTime.now());
+
+      final hiveDir =
+          io.Directory('${metadataDir.path}/cached_network_image_ce/hive');
+      if (hiveDir.existsSync()) {
+        hiveDir.deleteSync(recursive: true);
+      }
+
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => cacheDir,
+        metadataDirectoryProvider: () async => metadataDir,
+      );
+
+      expect(await manager2.getFileFromCache(oldUrl), isNull);
+      expect(await manager2.getFileFromCache(recentUrl), isNull);
+
+      for (var i = 0; i < 50; i++) {
+        if (!oldFile.existsSync()) break;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(oldFile.existsSync(), isFalse);
+      expect(recentFile.existsSync(), isTrue);
+
+      await manager2.dispose();
+    });
+
     test('recovers when cache files are deleted but Hive metadata remains',
         () async {
       final customDir =

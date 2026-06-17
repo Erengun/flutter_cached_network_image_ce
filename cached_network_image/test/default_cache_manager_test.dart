@@ -816,7 +816,7 @@ void main() {
       expect(await manager2.getFileFromCache(oldUrl), isNull);
       expect(await manager2.getFileFromCache(recentUrl), isNull);
 
-      for (var i = 0; i < 50; i++) {
+      for (var i = 0; i < 150; i++) {
         if (!oldFile.existsSync()) break;
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }

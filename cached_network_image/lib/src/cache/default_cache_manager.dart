@@ -712,10 +712,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
       }
 
-      await _deleteOrphanedCacheFiles(
-        entries.map((entry) => entry.value.relativePath).toSet(),
-        now,
-      );
+      try {
+        await _deleteOrphanedCacheFiles(
+          entries.map((entry) => entry.value.relativePath).toSet(),
+          now,
+        );
+      } on Object catch (e) {
+        cacheLogger.log(
+          'CacheManager: Error during orphaned file cleanup: $e',
+          CacheManagerLogLevel.warning,
+        );
+      }
 
       // Remove expired entries
       for (final entry in entries) {
@@ -774,7 +781,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
 
-      await entity.delete();
+      try {
+        await entity.delete();
+      } on Object {
+        continue;
+      }
     }
   }
 

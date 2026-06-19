@@ -918,13 +918,14 @@ void main() {
       );
       await managerA2.getFileFromCache('trigger-init');
 
-      // Give the sweep time to run; it should find nothing of B's to delete.
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      // dispose() awaits the in-flight cleanup sweep, so by the time this
+      // returns the sweep has run to completion; it should find nothing of
+      // B's to delete.
+      await managerA2.dispose();
 
       expect(bFile.existsSync(), isTrue);
       expect(await managerB.getFileFromCache(bUrl), isNotNull);
 
-      await managerA2.dispose();
       await managerB.dispose();
     });
 

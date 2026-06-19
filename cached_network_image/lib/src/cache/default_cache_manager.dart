@@ -119,6 +119,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// loading at the same time on cold start) share the same init future.
   Completer<void>? _initCompleter;
 
+  /// Handle to the background cleanup sweep launched by [_doInit], so
+  /// [dispose] can wait for it instead of racing it.
+  Future<void>? _cleanupFuture;
+
   /// Initialize Hive and open the cache metadata box.
   ///
   /// Uses a [Completer] to ensure that only one initialization runs at a
@@ -150,11 +154,27 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   Future<void> _doInit() async {
     final dir = await _cacheDirectoryProvider();
-    _cacheDir = path.join(dir.path, 'cached_network_image_ce');
+    final metadataDir = _metadataDirectoryProvider == null
+        ? dir
+        : await _metadataDirectoryProvider!();
+
+    // When a distinct metadataDirectoryProvider is configured, namespace the
+    // cache file directory by that location. Otherwise two DefaultCacheManager
+    // instances could share the same cacheDirectoryProvider while keeping
+    // separate, unaware-of-each-other Hive boxes — each instance's orphan
+    // sweep would then see the other's files as unknown and delete them.
+    final cacheSubDir = _metadataDirectoryProvider == null
+        ? 'cached_network_image_ce'
+        : path.join(
+            'cached_network_image_ce',
+            sha256
+                .convert(utf8.encode(metadataDir.path))
+                .toString()
+                .substring(0, 16),
+          );
+    _cacheDir = path.join(dir.path, cacheSubDir);
     await io.Directory(_cacheDir!).create(recursive: true);
 
-    final metadataDir =
-        await (_metadataDirectoryProvider ?? _cacheDirectoryProvider)();
     final hivePath = path.join(
       metadataDir.path,
       'cached_network_image_ce',
@@ -182,8 +202,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       await _deleteCacheFiles();
     }
 
-    // Run cleanup in background
-    unawaited(_cleanupOldFiles());
+    // Run cleanup in background, but keep a handle so dispose() can wait
+    // for it instead of nulling fields out from under it mid-sweep.
+    _cleanupFuture = _cleanupOldFiles();
+    unawaited(_cleanupFuture);
   }
 
   /// Attempts to delete a Hive box from disk, tolerating missing files.
@@ -680,6 +702,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
+    final inFlightCleanup = _cleanupFuture;
+    if (inFlightCleanup != null) {
+      try {
+        await inFlightCleanup;
+      } on Object catch (_) {
+        // Already logged inside _cleanupOldFiles; ignore here.
+      }
+    }
+
     if (_cacheBox != null && _cacheBox!.isOpen) {
       try {
         await _cacheBox!.close();
@@ -697,6 +728,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     _cacheBox = null;
     _cacheDir = null;
     _initCompleter = null;
+    _cleanupFuture = null;
   }
 
   /// Clean up files that haven't been used in a while.
@@ -712,17 +744,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
       }
 
-      try {
-        await _deleteOrphanedCacheFiles(
-          entries.map((entry) => entry.value.relativePath).toSet(),
-          now,
-        );
-      } on Object catch (e) {
-        cacheLogger.log(
-          'CacheManager: Error during orphaned file cleanup: $e',
-          CacheManagerLogLevel.warning,
-        );
-      }
+      await _deleteOrphanedCacheFiles(
+        entries.map((entry) => entry.value.relativePath).toSet(),
+        now,
+      );
 
       // Remove expired entries
       for (final entry in entries) {
@@ -773,11 +798,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       if (knownRelativePaths.contains(relativePath)) continue;
 
       try {
-        final stat = entity.statSync();
+        final stat = await entity.stat();
         if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
         await entity.delete();
-      } on Object {
-        continue;
+      } on Object catch (e) {
+        cacheLogger.log(
+          'CacheManager: Error checking/deleting orphaned file '
+          '${entity.path}: $e',
+          CacheManagerLogLevel.warning,
+        );
       }
     }
   }

@@ -185,6 +185,47 @@ void main() {
       await box.close();
       await hive.close();
     });
+
+    test(
+        'does not invoke cacheDirectoryProvider twice when '
+        'metadataDirectoryProvider is omitted', () async {
+      final providerDirs = <io.Directory>[
+        io.Directory.systemTemp.createTempSync('double_invoke_a_'),
+        io.Directory.systemTemp.createTempSync('double_invoke_b_'),
+      ];
+      addTearDown(() {
+        for (final dir in providerDirs) {
+          try {
+            dir.deleteSync(recursive: true);
+          } on Object catch (_) {}
+        }
+      });
+
+      var callCount = 0;
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => providerDirs[callCount++],
+      );
+
+      await manager.putFile(
+        'https://example.com/double-invoke.bin',
+        [1, 2, 3],
+        fileExtension: 'bin',
+      );
+
+      expect(
+        callCount,
+        1,
+        reason: 'cacheDirectoryProvider must be resolved once and reused '
+            'for metadata when metadataDirectoryProvider is omitted',
+      );
+
+      final hiveDirOnFirstCall = io.Directory(
+        '${providerDirs[0].path}/cached_network_image_ce/hive',
+      );
+      expect(hiveDirOnFirstCall.existsSync(), isTrue);
+
+      await manager.dispose();
+    });
   });
 
   // ---- Concurrent initialization (race condition regression) ----
@@ -825,6 +866,66 @@ void main() {
       expect(recentFile.existsSync(), isTrue);
 
       await manager2.dispose();
+    });
+
+    test(
+        'orphan sweep from one metadataDirectoryProvider does not delete '
+        'cache files owned by another sharing the same cacheDirectoryProvider',
+        () async {
+      final sharedCacheDir =
+          io.Directory.systemTemp.createTempSync('shared_cache_dir_');
+      final metadataDirA =
+          io.Directory.systemTemp.createTempSync('isolation_metadata_a_');
+      final metadataDirB =
+          io.Directory.systemTemp.createTempSync('isolation_metadata_b_');
+      addTearDown(() {
+        for (final dir in [sharedCacheDir, metadataDirA, metadataDirB]) {
+          try {
+            dir.deleteSync(recursive: true);
+          } on Object catch (_) {}
+        }
+      });
+
+      final managerA = DefaultCacheManager(
+        cacheDirectoryProvider: () async => sharedCacheDir,
+        metadataDirectoryProvider: () async => metadataDirA,
+      );
+      final managerB = DefaultCacheManager(
+        cacheDirectoryProvider: () async => sharedCacheDir,
+        metadataDirectoryProvider: () async => metadataDirB,
+      );
+
+      const bUrl = 'https://example.com/isolation-b-only.bin';
+      await managerB.putFile(bUrl, [4, 5, 6], fileExtension: 'bin');
+      final bCached = await managerB.getFileFromCache(bUrl);
+      expect(bCached, isNotNull);
+      final bFile = bCached!.file as io.File;
+
+      // Make B's file look old enough to be eligible for orphan deletion
+      // by a sweep that has no knowledge of it.
+      await bFile.setLastModified(
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+
+      await managerA.dispose();
+
+      // A fresh manager A instance: same cacheDirectoryProvider as B, but a
+      // different metadataDirectoryProvider. Its cold-start orphan sweep
+      // must not see (and delete) a file it doesn't own.
+      final managerA2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => sharedCacheDir,
+        metadataDirectoryProvider: () async => metadataDirA,
+      );
+      await managerA2.getFileFromCache('trigger-init');
+
+      // Give the sweep time to run; it should find nothing of B's to delete.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(bFile.existsSync(), isTrue);
+      expect(await managerB.getFileFromCache(bUrl), isNotNull);
+
+      await managerA2.dispose();
+      await managerB.dispose();
     });
 
     test('recovers when cache files are deleted but Hive metadata remains',
@@ -1653,6 +1754,56 @@ void main() {
 
       await manager2.emptyCache();
       await manager2.dispose();
+    });
+
+    test('dispose waits for an in-flight cleanup sweep to finish', () async {
+      final cacheDir =
+          io.Directory.systemTemp.createTempSync('dispose_race_cache_');
+      addTearDown(() {
+        try {
+          cacheDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => cacheDir,
+        maxNrOfCacheObjects: 2,
+      );
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      const total = 30;
+      for (var i = 0; i < total; i++) {
+        await manager.putFile(
+          'https://example.com/dispose-race-$i-$now.bin',
+          [i],
+          fileExtension: 'bin',
+          maxAge: const Duration(hours: 1),
+        );
+      }
+      await manager.dispose();
+
+      // Re-initialize — construction triggers an unawaited cleanup sweep
+      // that must trim `total` entries down to maxNrOfCacheObjects.
+      final manager2 = DefaultCacheManager(
+        cacheDirectoryProvider: () async => cacheDir,
+        maxNrOfCacheObjects: 2,
+      );
+      await manager2.getFileFromCache('trigger-init-$now');
+
+      // No delay here: dispose() must itself wait for the cleanup sweep it
+      // kicked off during initialization before returning.
+      await manager2.dispose();
+
+      final hiveDir =
+          io.Directory('${cacheDir.path}/cached_network_image_ce/hive');
+      final hive = HiveImpl();
+      final box = await hive.openBox<Map>(
+        'cached_network_image_cache',
+        path: hiveDir.path,
+      );
+      expect(box.length, lessThanOrEqualTo(2));
+      await box.close();
+      await hive.close();
     });
   });
 

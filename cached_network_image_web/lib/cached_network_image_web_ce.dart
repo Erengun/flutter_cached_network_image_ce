@@ -188,7 +188,15 @@ class ImageLoader implements platform.ImageLoader {
                     detectedFormat: unsupportedFormat,
                   );
                 }
-                final data = await decode(value);
+                final ui.Codec data;
+                try {
+                  data = await decode(value);
+                } catch (_) {
+                  throw UnsupportedImageFormatException(
+                    bytes: value,
+                    url: url,
+                  );
+                }
                 streamController.add(data);
                 if (state == _State.closing) {
                   streamController.close();

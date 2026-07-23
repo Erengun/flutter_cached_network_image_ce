@@ -129,7 +129,12 @@ class ImageLoader implements platform.ImageLoader {
               detectedFormat: unsupportedFormat,
             );
           }
-          final decoded = await decode(bytes);
+          final ui.Codec decoded;
+          try {
+            decoded = await decode(bytes);
+          } catch (_) {
+            throw UnsupportedImageFormatException(bytes: bytes, url: url);
+          }
           yield decoded;
         }
       }

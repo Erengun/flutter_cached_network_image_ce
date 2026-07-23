@@ -289,6 +289,13 @@ genuinely corrupt file) is only caught once decoding is actually attempted, so
 numbers) if you need to distinguish which format/decoder to use inside
 `unsupportedImageBuilder`.
 
+**Web caveat:** this whole mechanism requires the raw cached bytes, so it only
+works with `ImageRenderMethodForWeb.HttpGet`. The default `HtmlImage` render
+method hands the URL straight to the browser's native image pipeline and never
+has bytes to inspect, so a decode failure there falls straight through to
+`errorBuilder`/`errorWidget` as a plain error, not an
+`UnsupportedImageFormatException`.
+
 ## ❓ FAQ
 
 **Q: Will I lose my users' existing cache if I migrate?**

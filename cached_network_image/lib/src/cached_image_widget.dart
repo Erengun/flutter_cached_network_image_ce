@@ -123,6 +123,12 @@ class CachedNetworkImage extends StatefulWidget {
   /// If this is `null` and the image format is unsupported, the
   /// [errorWidget] builder is called instead (with an
   /// [UnsupportedImageFormatException]).
+  ///
+  /// On Flutter Web, this only applies when using
+  /// `ImageRenderMethodForWeb.HttpGet`. The default `HtmlImage` render
+  /// method decodes through the browser's native image pipeline and has no
+  /// access to the raw bytes, so decode failures there surface as a plain
+  /// error instead.
   final UnsupportedImageWidgetBuilder? unsupportedImageBuilder;
 
   /// The duration of the fade-in animation for the [placeholder].

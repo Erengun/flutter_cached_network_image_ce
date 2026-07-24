@@ -932,33 +932,44 @@ void main() {
       await manager.dispose();
     });
 
-    test('http.Client is closed after successful download', () async {
-      var clientClosed = false;
+    test('http.Client is reused across downloads and closed by dispose',
+        () async {
+      var factoryCalls = 0;
+      var closeCalls = 0;
       final manager = DefaultCacheManager(
         hiveInstance: testHive,
         httpClientFactory: () {
+          factoryCalls++;
           final mock = http_testing.MockClient(
             (request) async => http.Response('ok', 200),
           );
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
 
+      expect(factoryCalls, 0);
+
       await manager
-          .getFileStream('https://example.com/web-client-ok.png')
+          .getFileStream('https://example.com/web-client-first.png')
+          .toList();
+      await manager
+          .getFileStream('https://example.com/web-client-second.png')
           .toList();
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed after download');
+      expect(factoryCalls, 1);
+      expect(closeCalls, 0);
 
-      await manager.emptyCache();
       await manager.dispose();
+      expect(closeCalls, 1);
+
+      await manager.dispose();
+      expect(closeCalls, 1);
     });
 
-    test('http.Client is closed after HTTP error', () async {
-      var clientClosed = false;
+    test('http.Client remains open after HTTP error until dispose', () async {
+      var closeCalls = 0;
       final manager = DefaultCacheManager(
         hiveInstance: testHive,
         httpClientFactory: () {
@@ -966,7 +977,7 @@ void main() {
             (request) async => http.Response('fail', 500),
           );
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
@@ -977,10 +988,44 @@ void main() {
             .toList();
       } on Object catch (_) {}
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even on error');
+      expect(closeCalls, 0);
 
       await manager.dispose();
+      expect(closeCalls, 1);
+    });
+
+    test('download after dispose creates a new http.Client', () async {
+      var factoryCalls = 0;
+      var closeCalls = 0;
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        httpClientFactory: () {
+          factoryCalls++;
+          return _CloseTrackingClient(
+            http_testing.MockClient(
+              (request) async => http.Response('ok', 200),
+            ),
+            onClose: () {
+              closeCalls++;
+            },
+          );
+        },
+      );
+
+      await manager
+          .getFileStream('https://example.com/web-before-dispose.png')
+          .toList();
+      await manager.dispose();
+
+      await manager
+          .getFileStream('https://example.com/web-after-dispose.png')
+          .toList();
+
+      expect(factoryCalls, 2);
+      expect(closeCalls, 1);
+
+      await manager.dispose();
+      expect(closeCalls, 2);
     });
   });
 
@@ -1101,7 +1146,8 @@ void main() {
       expect(fileInfos.first.source.name, 'Online');
     });
 
-    test('client is closed even when connectionTimeout fires', () async {
+    test('client remains open after connection timeout until dispose',
+        () async {
       var clientClosed = false;
 
       manager = DefaultCacheManager(
@@ -1128,8 +1174,9 @@ void main() {
             .toList();
       } on Object catch (_) {}
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even on timeout');
+      expect(clientClosed, isFalse);
+      await manager.dispose();
+      expect(clientClosed, isTrue);
     });
   });
 

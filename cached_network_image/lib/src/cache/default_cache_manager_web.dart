@@ -68,8 +68,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// handled by the browser.
   final ConnectionParameters? connectionParameters;
 
-  /// Factory for creating HTTP clients.
+  /// Factory for lazily creating the shared HTTP client.
   final http.Client Function() _httpClientFactory;
+
+  http.Client? _httpClient;
+
+  http.Client get _client => _httpClient ??= _httpClientFactory();
 
   /// In-memory file system used to materialise cached bytes as [File] objects.
   final MemoryFileSystem _memFs = MemoryFileSystem();
@@ -255,63 +259,58 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       request.headers.addAll(headers);
     }
 
-    final client = _httpClientFactory();
-    try {
-      final connectionTimeout = connectionParameters?.connectionTimeout;
-      final response = connectionTimeout != null
-          ? await client.send(request).timeout(connectionTimeout)
-          : await client.send(request);
+    final connectionTimeout = connectionParameters?.connectionTimeout;
+    final response = connectionTimeout != null
+        ? await _client.send(request).timeout(connectionTimeout)
+        : await _client.send(request);
 
-      if (response.statusCode != 200 && response.statusCode != 202) {
-        throw HttpExceptionWithStatus(
-          response.statusCode,
-          'Invalid statusCode: ${response.statusCode}',
-          uri: Uri.parse(url),
-        );
-      }
-
-      final contentLength = response.contentLength;
-      final allBytes = <int>[];
-      var receivedBytes = 0;
-
-      final requestTimeout = connectionParameters?.requestTimeout;
-      final stream = requestTimeout != null
-          ? response.stream.timeout(requestTimeout)
-          : response.stream;
-
-      await for (final chunk in stream) {
-        receivedBytes += chunk.length;
-        allBytes.addAll(chunk);
-        if (withProgress) {
-          yield DownloadProgress(url, contentLength, receivedBytes);
-        }
-      }
-
-      // Store metadata + data in Hive.
-      final validTill = DateTime.now().add(stalePeriod);
-      final cacheHeaders = response.headers;
-      final eTag = cacheHeaders['etag'];
-      final fileExtension = _getFileExtensionFromUrl(url);
-      final relativePath =
-          '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
-
-      await _metaBox!.put(
-        _sanitizeBoxKey(key),
-        CacheEntryMetadata(
-          url: url,
-          relativePath: relativePath,
-          validTill: validTill,
-          eTag: eTag,
-          length: receivedBytes,
-        ).toMap(),
+    if (response.statusCode != 200 && response.statusCode != 202) {
+      throw HttpExceptionWithStatus(
+        response.statusCode,
+        'Invalid statusCode: ${response.statusCode}',
+        uri: Uri.parse(url),
       );
-      await _dataBox!.put(_sanitizeBoxKey(key), allBytes);
-
-      final file = _bytesToFile(relativePath, allBytes);
-      yield FileInfo(file, FileSource.Online, validTill, url);
-    } finally {
-      client.close();
     }
+
+    final contentLength = response.contentLength;
+    final allBytes = <int>[];
+    var receivedBytes = 0;
+
+    final requestTimeout = connectionParameters?.requestTimeout;
+    final stream = requestTimeout != null
+        ? response.stream.timeout(requestTimeout)
+        : response.stream;
+
+    await for (final chunk in stream) {
+      receivedBytes += chunk.length;
+      allBytes.addAll(chunk);
+      if (withProgress) {
+        yield DownloadProgress(url, contentLength, receivedBytes);
+      }
+    }
+
+    // Store metadata + data in Hive.
+    final validTill = DateTime.now().add(stalePeriod);
+    final cacheHeaders = response.headers;
+    final eTag = cacheHeaders['etag'];
+    final fileExtension = _getFileExtensionFromUrl(url);
+    final relativePath =
+        '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
+
+    await _metaBox!.put(
+      _sanitizeBoxKey(key),
+      CacheEntryMetadata(
+        url: url,
+        relativePath: relativePath,
+        validTill: validTill,
+        eTag: eTag,
+        length: receivedBytes,
+      ).toMap(),
+    );
+    await _dataBox!.put(_sanitizeBoxKey(key), allBytes);
+
+    final file = _bytesToFile(relativePath, allBytes);
+    yield FileInfo(file, FileSource.Online, validTill, url);
   }
 
   @override
@@ -426,6 +425,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         // Ignore init errors during dispose.
       }
     }
+
+    final client = _httpClient;
+    _httpClient = null;
+    client?.close();
 
     if (_metaBox != null && _metaBox!.isOpen) {
       await _metaBox!.close();

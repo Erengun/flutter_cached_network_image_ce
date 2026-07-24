@@ -1957,7 +1957,8 @@ void main() {
       expect(fileInfos.first.source.name, 'Online');
     });
 
-    test('client is closed even when connectionTimeout fires', () async {
+    test('client remains open after connection timeout until dispose',
+        () async {
       var clientClosed = false;
 
       manager = DefaultCacheManager(
@@ -1983,8 +1984,9 @@ void main() {
             .toList();
       } on Object catch (_) {}
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even on timeout');
+      expect(clientClosed, isFalse);
+      await manager.dispose();
+      expect(clientClosed, isTrue);
     });
   });
 

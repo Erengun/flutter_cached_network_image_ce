@@ -89,8 +89,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// wait indefinitely — preserving the existing behaviour.
   final ConnectionParameters? connectionParameters;
 
-  /// Factory for creating HTTP clients (injectable for testing).
+  /// Factory for lazily creating the shared HTTP client.
   final http.Client Function() _httpClientFactory;
+
+  http.Client? _httpClient;
+
+  http.Client get _client => _httpClient ??= _httpClientFactory();
 
   /// Provider for the base cache directory.
   final CacheDirectoryProvider _cacheDirectoryProvider;
@@ -391,7 +395,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final proceed = reqOutcome as HttpRequestProceed;
-    final client = _httpClientFactory();
     try {
       final request = http.Request('GET', Uri.parse(proceed.data.url));
       if (proceed.data.headers.isNotEmpty) {
@@ -400,8 +403,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       final connectionTimeout = connectionParameters?.connectionTimeout;
       final rawResponse = connectionTimeout != null
-          ? await client.send(request).timeout(connectionTimeout)
-          : await client.send(request);
+          ? await _client.send(request).timeout(connectionTimeout)
+          : await _client.send(request);
 
       // Splice 2: run onResponse chain — interceptors may replace the response
       final processedRes = await runOnResponseChain(
@@ -420,9 +423,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
       final rethrow_ = errorOutcome as HttpErrorRethrow;
       Error.throwWithStackTrace(rethrow_.error, rethrow_.stackTrace);
-    } finally {
-      // client.close() runs after the stream is consumed (normal path) or on error
-      client.close();
     }
   }
 
@@ -710,6 +710,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         // Already logged inside _cleanupOldFiles; ignore here.
       }
     }
+
+    final client = _httpClient;
+    _httpClient = null;
+    client?.close();
 
     if (_cacheBox != null && _cacheBox!.isOpen) {
       try {

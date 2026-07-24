@@ -1415,9 +1415,20 @@ void main() {
 
     test('error on HTTP 404 is propagated to stream (no cached file)',
         () async {
+      var responseBodyCanceled = false;
       manager = DefaultCacheManager(
-        httpClientFactory: () => http_testing.MockClient(
-          (request) async => http.Response('Not Found', 404),
+        httpClientFactory: () => http_testing.MockClient.streaming(
+          (request, bodyStream) async {
+            late final StreamController<List<int>> controller;
+            controller = StreamController<List<int>>(
+              onCancel: () async {
+                responseBodyCanceled = true;
+                await controller.close();
+              },
+            );
+            controller.add([1, 2, 3]);
+            return http.StreamedResponse(controller.stream, 404);
+          },
         ),
       );
 
@@ -1432,6 +1443,7 @@ void main() {
 
       expect(caughtError, isA<HttpExceptionWithStatus>());
       expect((caughtError! as HttpExceptionWithStatus).statusCode, 404);
+      expect(responseBodyCanceled, isTrue);
     });
 
     test('error on HTTP 500 is propagated to stream', () async {
@@ -1960,33 +1972,82 @@ void main() {
     test('client remains open after connection timeout until dispose',
         () async {
       var clientClosed = false;
+      var requestAborted = false;
 
       manager = DefaultCacheManager(
         connectionParameters: ConnectionParameters(
           connectionTimeout: const Duration(milliseconds: 50),
         ),
-        httpClientFactory: () {
-          final inner = http_testing.MockClient.streaming(
-            (request, bodyStream) async {
-              await Future<void>.delayed(const Duration(seconds: 10));
-              return http.StreamedResponse(const Stream.empty(), 200);
-            },
-          );
-          return _TimeoutCloseTrackingClient(inner, onClose: () {
+        httpClientFactory: () => _AbortTrackingClient(
+          onAbort: () {
+            requestAborted = true;
+          },
+          onClose: () {
             clientClosed = true;
-          });
-        },
+          },
+        ),
       );
 
+      Object? error;
       try {
         await manager
             .getFileStream('https://example.com/close-test.png')
             .toList();
-      } on Object catch (_) {}
+      } on Object catch (caught) {
+        error = caught;
+      }
 
+      await Future<void>.delayed(Duration.zero);
+      expect(error, isA<TimeoutException>());
+      expect(requestAborted, isTrue);
       expect(clientClosed, isFalse);
       await manager.dispose();
       expect(clientClosed, isTrue);
+    });
+
+    test('connection timeout does not abort response body after headers',
+        () async {
+      var bodyCompleted = false;
+      var abortTriggerCompleted = false;
+      var abortedBeforeBodyCompleted = false;
+
+      manager = DefaultCacheManager(
+        connectionParameters: ConnectionParameters(
+          connectionTimeout: const Duration(milliseconds: 20),
+        ),
+        httpClientFactory: () => http_testing.MockClient.streaming(
+          (request, bodyStream) async {
+            final abortable = request as http.Abortable;
+            unawaited(abortable.abortTrigger!.then((_) {
+              abortTriggerCompleted = true;
+              if (!bodyCompleted) {
+                abortedBeforeBodyCompleted = true;
+              }
+            }));
+
+            final controller = StreamController<List<int>>();
+            unawaited(Future<void>.delayed(
+              const Duration(milliseconds: 50),
+              () async {
+                controller.add([1, 2, 3]);
+                bodyCompleted = true;
+                await controller.close();
+              },
+            ));
+            return http.StreamedResponse(controller.stream, 200);
+          },
+        ),
+      );
+
+      final events = await manager
+          .getFileStream('https://example.com/slow-body.png')
+          .toList();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events.whereType<FileInfo>(), isNotEmpty);
+      expect(bodyCompleted, isTrue);
+      expect(abortTriggerCompleted, isTrue);
+      expect(abortedBeforeBodyCompleted, isFalse);
     });
   });
 
@@ -2344,21 +2405,25 @@ void main() {
   });
 }
 
-/// A wrapper around [http.Client] that tracks whether [close] was called.
-class _TimeoutCloseTrackingClient extends http.BaseClient {
-  _TimeoutCloseTrackingClient(this._inner, {required this.onClose});
+class _AbortTrackingClient extends http.BaseClient {
+  _AbortTrackingClient({
+    required this.onAbort,
+    required this.onClose,
+  });
 
-  final http.Client _inner;
+  final void Function() onAbort;
   final void Function() onClose;
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
-    return _inner.send(request);
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final abortable = request as http.Abortable;
+    await abortable.abortTrigger;
+    onAbort();
+    throw http.RequestAbortedException(request.url);
   }
 
   @override
   void close() {
     onClose();
-    _inner.close();
   }
 }

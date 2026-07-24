@@ -395,26 +395,54 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final proceed = reqOutcome as HttpRequestProceed;
+    final abortCompleter = Completer<void>();
+    http.StreamedResponse? rawResponse;
     try {
-      final request = http.Request('GET', Uri.parse(proceed.data.url));
+      final request = http.AbortableRequest(
+        'GET',
+        Uri.parse(proceed.data.url),
+        abortTrigger: abortCompleter.future,
+      );
       if (proceed.data.headers.isNotEmpty) {
         request.headers.addAll(proceed.data.headers);
       }
 
       final connectionTimeout = connectionParameters?.connectionTimeout;
-      final rawResponse = connectionTimeout != null
-          ? await _client.send(request).timeout(connectionTimeout)
-          : await _client.send(request);
+      final sendFuture = _client.send(request);
+      final response = connectionTimeout != null
+          ? await sendFuture.timeout(
+              connectionTimeout,
+              onTimeout: () {
+                if (!abortCompleter.isCompleted) {
+                  abortCompleter.complete();
+                }
+                throw TimeoutException(
+                  'Connection timed out after $connectionTimeout',
+                  connectionTimeout,
+                );
+              },
+            )
+          : await sendFuture;
+      rawResponse = response;
 
       // Splice 2: run onResponse chain — interceptors may replace the response
       final processedRes = await runOnResponseChain(
         _httpInterceptors,
-        HttpResponseData(response: rawResponse, originalUrl: url),
+        HttpResponseData(response: response, originalUrl: url),
       );
+      if (!identical(processedRes.response, response)) {
+        await _cancelResponseStream(response);
+        rawResponse = null;
+      }
 
       // _processResponse reads the stream; client must remain open until done
       yield* _processResponse(url, key, withProgress, processedRes);
     } catch (e, st) {
+      final response = rawResponse;
+      if (response != null) {
+        await _cancelResponseStream(response);
+      }
+
       // Splice 3: run onError chain for all errors (network, status, stream)
       final errorOutcome = await runOnErrorChain(_httpInterceptors, e, st);
       if (errorOutcome is HttpErrorResolved) {
@@ -423,6 +451,22 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
       final rethrow_ = errorOutcome as HttpErrorRethrow;
       Error.throwWithStackTrace(rethrow_.error, rethrow_.stackTrace);
+    } finally {
+      if (!abortCompleter.isCompleted) {
+        abortCompleter.complete();
+      }
+    }
+  }
+
+  Future<void> _cancelResponseStream(http.StreamedResponse response) async {
+    try {
+      final subscription = response.stream.listen(
+        null,
+        onError: (Object _, StackTrace __) {},
+      );
+      await subscription.cancel();
+    } on Object catch (_) {
+      // The stream may already have been consumed or canceled.
     }
   }
 
@@ -439,6 +483,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final response = resData.response;
 
     if (response.statusCode != 200 && response.statusCode != 202) {
+      await _cancelResponseStream(response);
       throw HttpExceptionWithStatus(
         response.statusCode,
         'Invalid statusCode: ${response.statusCode}',

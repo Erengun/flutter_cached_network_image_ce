@@ -195,10 +195,21 @@ void main() {
     test('replaces response body — downstream gets replaced bytes', () async {
       final original = Uint8List.fromList([0, 1, 2, 3]);
       final replacement = _pngBytes;
+      var originalBodyCanceled = false;
 
-      final mockClient = http_testing.MockClient((request) async {
-        return http.Response.bytes(original, 200);
-      });
+      final mockClient = http_testing.MockClient.streaming(
+        (request, bodyStream) async {
+          late final StreamController<List<int>> controller;
+          controller = StreamController<List<int>>(
+            onCancel: () async {
+              originalBodyCanceled = true;
+              await controller.close();
+            },
+          );
+          controller.add(original);
+          return http.StreamedResponse(controller.stream, 200);
+        },
+      );
 
       final interceptor = _ResponseReplacingInterceptor(replacement);
       final manager = DefaultCacheManager(
@@ -211,6 +222,7 @@ void main() {
 
       final writtenBytes = await info.file.readAsBytes();
       expect(writtenBytes, replacement);
+      expect(originalBodyCanceled, isTrue);
     });
 
     test('next() passes through — original response is used', () async {

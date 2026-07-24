@@ -254,63 +254,86 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       CacheManagerLogLevel.verbose,
     );
 
-    final request = http.Request('GET', Uri.parse(url));
+    final abortCompleter = Completer<void>();
+    final request = http.AbortableRequest(
+      'GET',
+      Uri.parse(url),
+      abortTrigger: abortCompleter.future,
+    );
     if (headers != null) {
       request.headers.addAll(headers);
     }
 
-    final connectionTimeout = connectionParameters?.connectionTimeout;
-    final response = connectionTimeout != null
-        ? await _client.send(request).timeout(connectionTimeout)
-        : await _client.send(request);
+    try {
+      final connectionTimeout = connectionParameters?.connectionTimeout;
+      final sendFuture = _client.send(request);
+      final response = connectionTimeout != null
+          ? await sendFuture.timeout(
+              connectionTimeout,
+              onTimeout: () {
+                if (!abortCompleter.isCompleted) {
+                  abortCompleter.complete();
+                }
+                throw TimeoutException(
+                  'Connection timed out after $connectionTimeout',
+                  connectionTimeout,
+                );
+              },
+            )
+          : await sendFuture;
 
-    if (response.statusCode != 200 && response.statusCode != 202) {
-      throw HttpExceptionWithStatus(
-        response.statusCode,
-        'Invalid statusCode: ${response.statusCode}',
-        uri: Uri.parse(url),
+      if (response.statusCode != 200 && response.statusCode != 202) {
+        throw HttpExceptionWithStatus(
+          response.statusCode,
+          'Invalid statusCode: ${response.statusCode}',
+          uri: Uri.parse(url),
+        );
+      }
+
+      final contentLength = response.contentLength;
+      final allBytes = <int>[];
+      var receivedBytes = 0;
+
+      final requestTimeout = connectionParameters?.requestTimeout;
+      final stream = requestTimeout != null
+          ? response.stream.timeout(requestTimeout)
+          : response.stream;
+
+      await for (final chunk in stream) {
+        receivedBytes += chunk.length;
+        allBytes.addAll(chunk);
+        if (withProgress) {
+          yield DownloadProgress(url, contentLength, receivedBytes);
+        }
+      }
+
+      // Store metadata + data in Hive.
+      final validTill = DateTime.now().add(stalePeriod);
+      final cacheHeaders = response.headers;
+      final eTag = cacheHeaders['etag'];
+      final fileExtension = _getFileExtensionFromUrl(url);
+      final relativePath =
+          '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
+
+      await _metaBox!.put(
+        _sanitizeBoxKey(key),
+        CacheEntryMetadata(
+          url: url,
+          relativePath: relativePath,
+          validTill: validTill,
+          eTag: eTag,
+          length: receivedBytes,
+        ).toMap(),
       );
-    }
+      await _dataBox!.put(_sanitizeBoxKey(key), allBytes);
 
-    final contentLength = response.contentLength;
-    final allBytes = <int>[];
-    var receivedBytes = 0;
-
-    final requestTimeout = connectionParameters?.requestTimeout;
-    final stream = requestTimeout != null
-        ? response.stream.timeout(requestTimeout)
-        : response.stream;
-
-    await for (final chunk in stream) {
-      receivedBytes += chunk.length;
-      allBytes.addAll(chunk);
-      if (withProgress) {
-        yield DownloadProgress(url, contentLength, receivedBytes);
+      final file = _bytesToFile(relativePath, allBytes);
+      yield FileInfo(file, FileSource.Online, validTill, url);
+    } finally {
+      if (!abortCompleter.isCompleted) {
+        abortCompleter.complete();
       }
     }
-
-    // Store metadata + data in Hive.
-    final validTill = DateTime.now().add(stalePeriod);
-    final cacheHeaders = response.headers;
-    final eTag = cacheHeaders['etag'];
-    final fileExtension = _getFileExtensionFromUrl(url);
-    final relativePath =
-        '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
-
-    await _metaBox!.put(
-      _sanitizeBoxKey(key),
-      CacheEntryMetadata(
-        url: url,
-        relativePath: relativePath,
-        validTill: validTill,
-        eTag: eTag,
-        length: receivedBytes,
-      ).toMap(),
-    );
-    await _dataBox!.put(_sanitizeBoxKey(key), allBytes);
-
-    final file = _bytesToFile(relativePath, allBytes);
-    yield FileInfo(file, FileSource.Online, validTill, url);
   }
 
   @override

@@ -13,6 +13,8 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 
+import 'support/http_clients.dart';
+
 /// A custom object that forces Hive to write a user-defined typeId into
 /// the box file. When the box is later opened without this adapter
 /// registered, Hive throws [HiveError] with "unknown typeId".
@@ -1978,7 +1980,7 @@ void main() {
         connectionParameters: ConnectionParameters(
           connectionTimeout: const Duration(milliseconds: 50),
         ),
-        httpClientFactory: () => _AbortTrackingClient(
+        httpClientFactory: () => AbortTrackingClient(
           onAbort: () {
             requestAborted = true;
           },
@@ -2403,27 +2405,4 @@ void main() {
       await manager.dispose();
     });
   });
-}
-
-class _AbortTrackingClient extends http.BaseClient {
-  _AbortTrackingClient({
-    required this.onAbort,
-    required this.onClose,
-  });
-
-  final void Function() onAbort;
-  final void Function() onClose;
-
-  @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    final abortable = request as http.Abortable;
-    await abortable.abortTrigger;
-    onAbort();
-    throw http.RequestAbortedException(request.url);
-  }
-
-  @override
-  void close() {
-    onClose();
-  }
 }

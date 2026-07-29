@@ -21,6 +21,7 @@ import 'cleanup_strategy.dart';
 import 'interceptors/cache_interceptor.dart';
 import 'interceptors/http_interceptor.dart';
 import 'interceptors/interceptor_runner.dart';
+import 'shared_http_client.dart';
 
 export 'cache_entry_metadata.dart';
 
@@ -69,7 +70,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     List<HttpInterceptor> httpInterceptors = const [],
     List<CacheInterceptor> cacheInterceptors = const [],
     CleanupStrategy? cleanupStrategy,
-  })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
+  })  : _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getTemporaryDirectory,
         _metadataDirectoryProvider = metadataDirectoryProvider,
@@ -89,12 +90,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// wait indefinitely — preserving the existing behaviour.
   final ConnectionParameters? connectionParameters;
 
-  /// Factory for lazily creating the shared HTTP client.
-  final http.Client Function() _httpClientFactory;
-
-  http.Client? _httpClient;
-
-  http.Client get _client => _httpClient ??= _httpClientFactory();
+  final SharedHttpClient _httpClient;
 
   /// Provider for the base cache directory.
   final CacheDirectoryProvider _cacheDirectoryProvider;
@@ -395,34 +391,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final proceed = reqOutcome as HttpRequestProceed;
-    final abortCompleter = Completer<void>();
+    SharedHttpClientResponse? clientResponse;
     http.StreamedResponse? rawResponse;
     try {
-      final request = http.AbortableRequest(
-        'GET',
-        Uri.parse(proceed.data.url),
-        abortTrigger: abortCompleter.future,
+      clientResponse = await _httpClient.send(
+        uri: Uri.parse(proceed.data.url),
+        headers: proceed.data.headers,
+        connectionTimeout: connectionParameters?.connectionTimeout,
       );
-      if (proceed.data.headers.isNotEmpty) {
-        request.headers.addAll(proceed.data.headers);
-      }
-
-      final connectionTimeout = connectionParameters?.connectionTimeout;
-      final sendFuture = _client.send(request);
-      final response = connectionTimeout != null
-          ? await sendFuture.timeout(
-              connectionTimeout,
-              onTimeout: () {
-                if (!abortCompleter.isCompleted) {
-                  abortCompleter.complete();
-                }
-                throw TimeoutException(
-                  'Connection timed out after $connectionTimeout',
-                  connectionTimeout,
-                );
-              },
-            )
-          : await sendFuture;
+      final response = clientResponse.response;
       rawResponse = response;
 
       // Splice 2: run onResponse chain — interceptors may replace the response
@@ -432,6 +409,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       );
       if (!identical(processedRes.response, response)) {
         await _cancelResponseStream(response);
+        rawResponse = null;
+      }
+      if (processedRes.response.statusCode != 200 &&
+          processedRes.response.statusCode != 202) {
+        // _processResponse owns cancellation for invalid responses.
         rawResponse = null;
       }
 
@@ -452,9 +434,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final rethrow_ = errorOutcome as HttpErrorRethrow;
       Error.throwWithStackTrace(rethrow_.error, rethrow_.stackTrace);
     } finally {
-      if (!abortCompleter.isCompleted) {
-        abortCompleter.complete();
-      }
+      clientResponse?.release();
     }
   }
 
@@ -465,8 +445,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         onError: (Object _, StackTrace __) {},
       );
       await subscription.cancel();
-    } on Object catch (_) {
-      // The stream may already have been consumed or canceled.
+    } on StateError catch (_) {
+      // A downstream owner may already have consumed the single-subscription
+      // stream. Other cleanup failures should remain visible.
     }
   }
 
@@ -756,9 +737,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
-    final client = _httpClient;
-    _httpClient = null;
-    client?.close();
+    _httpClient.dispose();
 
     if (_cacheBox != null && _cacheBox!.isOpen) {
       try {

@@ -13,6 +13,7 @@ import 'dart:ui' as ui;
 import 'package:cached_network_image_ce/cached_network_image.dart'
     hide DefaultCacheManager;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
+import 'package:cached_network_image_ce/src/cache/shared_http_client.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -222,7 +223,7 @@ void main() {
       expect(closeCalls, 1);
     });
 
-    test('download after dispose creates a new client', () async {
+    test('download after dispose creates and closes a new client', () async {
       var factoryCalls = 0;
       var closeCalls = 0;
       final manager = DefaultCacheManager(
@@ -249,10 +250,48 @@ void main() {
           .toList();
 
       expect(factoryCalls, 2);
-      expect(closeCalls, 1);
+      expect(closeCalls, 2);
 
       await manager.dispose();
       expect(closeCalls, 2);
+    });
+
+    test('post-dispose client closes after its last active download', () async {
+      var closeCalls = 0;
+      var sendCalls = 0;
+      final firstResponse = Completer<http.StreamedResponse>();
+      final secondResponse = Completer<http.StreamedResponse>();
+      final client = SharedHttpClient(
+        () => _CloseTrackingClient(
+          http_testing.MockClient.streaming((request, bodyStream) {
+            sendCalls++;
+            return sendCalls == 1
+                ? firstResponse.future
+                : secondResponse.future;
+          }),
+          onClose: () {
+            closeCalls++;
+          },
+        ),
+      );
+      client.dispose();
+
+      final firstSend = client.send(uri: Uri.parse('https://example.com/one'));
+      final secondSend = client.send(uri: Uri.parse('https://example.com/two'));
+
+      firstResponse.complete(
+        http.StreamedResponse(const Stream.empty(), 200),
+      );
+      final first = await firstSend;
+      first.release();
+      expect(closeCalls, 0);
+
+      secondResponse.complete(
+        http.StreamedResponse(const Stream.empty(), 200),
+      );
+      final second = await secondSend;
+      second.release();
+      expect(closeCalls, 1);
     });
   });
 

@@ -1,3 +1,13 @@
+## [4.10.0] - 2026-07-30
+
+* **Performance:** `DefaultCacheManager` now reuses a single HTTP client across downloads instead of creating and closing one per request, so connections can be kept alive between images.
+* **Fix:** A connection timeout now aborts the in-flight request instead of leaving it running in the background.
+* **Fix:** `dispose()` closes the reused client. Downloads started after disposal create their own client, which is closed once its last response is released.
+* **Behaviour change:** `dispose()` called while a download is in flight now aborts that download; previously each download owned its client and could outlive `dispose()`.
+* **Behaviour change:** An `onResponse` interceptor that replaces the response must not derive the replacement body from the original response's stream — the original body is now canceled as soon as it is replaced, to release its connection.
+
+contributed by [@Chlx42](https://github.com/Chlx42) — thanks! (PR #58)
+
 ## [4.9.0] - 2026-06-19
 
 * **Feature:** Added `metadataDirectoryProvider` to `DefaultCacheManager` so Hive metadata can be stored separately from cached image files on IO platforms.

@@ -13,6 +13,7 @@ import 'dart:ui' as ui;
 import 'package:cached_network_image_ce/cached_network_image.dart'
     hide DefaultCacheManager;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
+import 'package:cached_network_image_ce/src/cache/shared_http_client.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -131,37 +132,46 @@ void main() {
   });
 
   // ===========================================================================
-  // 2. http.Client closure in _downloadFile
+  // 2. Shared http.Client lifecycle
   // ===========================================================================
-  group('Leak: http.Client closure', () {
-    test('client.close() called after successful download', () async {
-      var clientClosed = false;
+  group('Leak: shared http.Client lifecycle', () {
+    test('client is reused across downloads and closed by dispose', () async {
+      var factoryCalls = 0;
+      var closeCalls = 0;
 
       final manager = DefaultCacheManager(
         httpClientFactory: () {
+          factoryCalls++;
           final mock = http_testing.MockClient(
             (request) async => http.Response('ok', 200),
           );
-          // Wrap to detect close
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
 
+      expect(factoryCalls, 0);
+
       await manager
-          .getFileStream('https://example.com/client-close-success.png')
+          .getFileStream('https://example.com/client-reuse-first.png')
+          .toList();
+      await manager
+          .getFileStream('https://example.com/client-reuse-second.png')
           .toList();
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed after successful download');
+      expect(factoryCalls, 1);
+      expect(closeCalls, 0);
 
-      await manager.emptyCache();
       await manager.dispose();
+      expect(closeCalls, 1);
+
+      await manager.dispose();
+      expect(closeCalls, 1);
     });
 
-    test('client.close() called after HTTP error', () async {
-      var clientClosed = false;
+    test('client remains open after HTTP error until dispose', () async {
+      var closeCalls = 0;
 
       final manager = DefaultCacheManager(
         httpClientFactory: () {
@@ -169,7 +179,7 @@ void main() {
             (request) async => http.Response('fail', 500),
           );
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
@@ -180,14 +190,14 @@ void main() {
             .toList();
       } on Object catch (_) {}
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even on HTTP error');
+      expect(closeCalls, 0);
 
       await manager.dispose();
+      expect(closeCalls, 1);
     });
 
-    test('client.close() called when send() throws', () async {
-      var clientClosed = false;
+    test('client remains open when send throws until dispose', () async {
+      var closeCalls = 0;
 
       final manager = DefaultCacheManager(
         httpClientFactory: () {
@@ -196,7 +206,7 @@ void main() {
                 throw const io.SocketException('Connection refused'),
           );
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
@@ -207,10 +217,81 @@ void main() {
             .toList();
       } on Object catch (_) {}
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even when send() throws');
+      expect(closeCalls, 0);
 
       await manager.dispose();
+      expect(closeCalls, 1);
+    });
+
+    test('download after dispose creates and closes a new client', () async {
+      var factoryCalls = 0;
+      var closeCalls = 0;
+      final manager = DefaultCacheManager(
+        httpClientFactory: () {
+          factoryCalls++;
+          return _CloseTrackingClient(
+            http_testing.MockClient(
+              (request) async => http.Response('ok', 200),
+            ),
+            onClose: () {
+              closeCalls++;
+            },
+          );
+        },
+      );
+
+      await manager
+          .getFileStream('https://example.com/client-before-dispose.png')
+          .toList();
+      await manager.dispose();
+
+      await manager
+          .getFileStream('https://example.com/client-after-dispose.png')
+          .toList();
+
+      expect(factoryCalls, 2);
+      expect(closeCalls, 2);
+
+      await manager.dispose();
+      expect(closeCalls, 2);
+    });
+
+    test('post-dispose client closes after its last active download', () async {
+      var closeCalls = 0;
+      var sendCalls = 0;
+      final firstResponse = Completer<http.StreamedResponse>();
+      final secondResponse = Completer<http.StreamedResponse>();
+      final client = SharedHttpClient(
+        () => _CloseTrackingClient(
+          http_testing.MockClient.streaming((request, bodyStream) {
+            sendCalls++;
+            return sendCalls == 1
+                ? firstResponse.future
+                : secondResponse.future;
+          }),
+          onClose: () {
+            closeCalls++;
+          },
+        ),
+      );
+      client.dispose();
+
+      final firstSend = client.send(uri: Uri.parse('https://example.com/one'));
+      final secondSend = client.send(uri: Uri.parse('https://example.com/two'));
+
+      firstResponse.complete(
+        http.StreamedResponse(const Stream.empty(), 200),
+      );
+      final first = await firstSend;
+      first.release();
+      expect(closeCalls, 0);
+
+      secondResponse.complete(
+        http.StreamedResponse(const Stream.empty(), 200),
+      );
+      final second = await secondSend;
+      second.release();
+      expect(closeCalls, 1);
     });
   });
 

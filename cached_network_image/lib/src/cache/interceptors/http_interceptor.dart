@@ -54,6 +54,11 @@ class HttpRequestHandler {
 /// all remaining interceptors and return this response immediately, or
 /// [reject] to convert the response into an error.
 ///
+/// A replacement response must not derive its body from the original
+/// response's stream. Once the chain returns a different response instance,
+/// the original body is canceled to release its connection, and reading a
+/// stream derived from it throws a [StateError].
+///
 /// `.create()` is for internal use by the package only.
 class HttpResponseHandler {
   @internal

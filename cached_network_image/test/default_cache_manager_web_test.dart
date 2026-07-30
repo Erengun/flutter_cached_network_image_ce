@@ -10,6 +10,8 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 
+import 'support/http_clients.dart';
+
 /// A custom object that forces Hive to write a user-defined typeId into
 /// the box file. When the box is later opened without this adapter
 /// registered, Hive throws [HiveError] with "unknown typeId".
@@ -932,33 +934,44 @@ void main() {
       await manager.dispose();
     });
 
-    test('http.Client is closed after successful download', () async {
-      var clientClosed = false;
+    test('http.Client is reused across downloads and closed by dispose',
+        () async {
+      var factoryCalls = 0;
+      var closeCalls = 0;
       final manager = DefaultCacheManager(
         hiveInstance: testHive,
         httpClientFactory: () {
+          factoryCalls++;
           final mock = http_testing.MockClient(
             (request) async => http.Response('ok', 200),
           );
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
 
+      expect(factoryCalls, 0);
+
       await manager
-          .getFileStream('https://example.com/web-client-ok.png')
+          .getFileStream('https://example.com/web-client-first.png')
+          .toList();
+      await manager
+          .getFileStream('https://example.com/web-client-second.png')
           .toList();
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed after download');
+      expect(factoryCalls, 1);
+      expect(closeCalls, 0);
 
-      await manager.emptyCache();
       await manager.dispose();
+      expect(closeCalls, 1);
+
+      await manager.dispose();
+      expect(closeCalls, 1);
     });
 
-    test('http.Client is closed after HTTP error', () async {
-      var clientClosed = false;
+    test('http.Client remains open after HTTP error until dispose', () async {
+      var closeCalls = 0;
       final manager = DefaultCacheManager(
         hiveInstance: testHive,
         httpClientFactory: () {
@@ -966,7 +979,7 @@ void main() {
             (request) async => http.Response('fail', 500),
           );
           return _CloseTrackingClient(mock, onClose: () {
-            clientClosed = true;
+            closeCalls++;
           });
         },
       );
@@ -977,10 +990,45 @@ void main() {
             .toList();
       } on Object catch (_) {}
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even on error');
+      expect(closeCalls, 0);
 
       await manager.dispose();
+      expect(closeCalls, 1);
+    });
+
+    test('download after dispose creates and closes a new http.Client',
+        () async {
+      var factoryCalls = 0;
+      var closeCalls = 0;
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        httpClientFactory: () {
+          factoryCalls++;
+          return _CloseTrackingClient(
+            http_testing.MockClient(
+              (request) async => http.Response('ok', 200),
+            ),
+            onClose: () {
+              closeCalls++;
+            },
+          );
+        },
+      );
+
+      await manager
+          .getFileStream('https://example.com/web-before-dispose.png')
+          .toList();
+      await manager.dispose();
+
+      await manager
+          .getFileStream('https://example.com/web-after-dispose.png')
+          .toList();
+
+      expect(factoryCalls, 2);
+      expect(closeCalls, 2);
+
+      await manager.dispose();
+      expect(closeCalls, 2);
     });
   });
 
@@ -1101,35 +1149,87 @@ void main() {
       expect(fileInfos.first.source.name, 'Online');
     });
 
-    test('client is closed even when connectionTimeout fires', () async {
+    test('client remains open after connection timeout until dispose',
+        () async {
       var clientClosed = false;
+      var requestAborted = false;
 
       manager = DefaultCacheManager(
         hiveInstance: testHive,
         connectionParameters: ConnectionParameters(
           connectionTimeout: const Duration(milliseconds: 50),
         ),
-        httpClientFactory: () {
-          final inner = http_testing.MockClient.streaming(
-            (request, bodyStream) async {
-              await Future<void>.delayed(const Duration(seconds: 10));
-              return http.StreamedResponse(const Stream.empty(), 200);
-            },
-          );
-          return _CloseTrackingClient(inner, onClose: () {
+        httpClientFactory: () => AbortTrackingClient(
+          onAbort: () {
+            requestAborted = true;
+          },
+          onClose: () {
             clientClosed = true;
-          });
-        },
+          },
+        ),
       );
 
+      Object? error;
       try {
         await manager
             .getFileStream('https://example.com/close-test.png')
             .toList();
-      } on Object catch (_) {}
+      } on Object catch (caught) {
+        error = caught;
+      }
 
-      expect(clientClosed, isTrue,
-          reason: 'http.Client must be closed even on timeout');
+      await Future<void>.delayed(Duration.zero);
+      expect(error, isA<TimeoutException>());
+      expect(requestAborted, isTrue);
+      expect(clientClosed, isFalse);
+      await manager.dispose();
+      expect(clientClosed, isTrue);
+    });
+
+    test('connection timeout does not abort response body after headers',
+        () async {
+      var bodyCompleted = false;
+      var abortTriggerCompleted = false;
+      var abortedBeforeBodyCompleted = false;
+
+      manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        connectionParameters: ConnectionParameters(
+          connectionTimeout: const Duration(milliseconds: 20),
+        ),
+        httpClientFactory: () => http_testing.MockClient.streaming(
+          (request, bodyStream) async {
+            final abortable = request as http.Abortable;
+            unawaited(abortable.abortTrigger!.then((_) {
+              abortTriggerCompleted = true;
+              if (!bodyCompleted) {
+                abortedBeforeBodyCompleted = true;
+              }
+            }));
+
+            final controller = StreamController<List<int>>();
+            unawaited(Future<void>.delayed(
+              const Duration(milliseconds: 50),
+              () async {
+                controller.add([1, 2, 3]);
+                bodyCompleted = true;
+                await controller.close();
+              },
+            ));
+            return http.StreamedResponse(controller.stream, 200);
+          },
+        ),
+      );
+
+      final events = await manager
+          .getFileStream('https://example.com/slow-body.png')
+          .toList();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events.whereType<FileInfo>(), isNotEmpty);
+      expect(bodyCompleted, isTrue);
+      expect(abortTriggerCompleted, isTrue);
+      expect(abortedBeforeBodyCompleted, isFalse);
     });
   });
 

@@ -21,6 +21,7 @@ import 'cleanup_strategy.dart';
 import 'interceptors/cache_interceptor.dart';
 import 'interceptors/http_interceptor.dart';
 import 'interceptors/interceptor_runner.dart';
+import 'shared_http_client.dart';
 
 export 'cache_entry_metadata.dart';
 
@@ -69,7 +70,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     List<HttpInterceptor> httpInterceptors = const [],
     List<CacheInterceptor> cacheInterceptors = const [],
     CleanupStrategy? cleanupStrategy,
-  })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
+  })  : _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getTemporaryDirectory,
         _metadataDirectoryProvider = metadataDirectoryProvider,
@@ -89,8 +90,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// wait indefinitely — preserving the existing behaviour.
   final ConnectionParameters? connectionParameters;
 
-  /// Factory for creating HTTP clients (injectable for testing).
-  final http.Client Function() _httpClientFactory;
+  final SharedHttpClient _httpClient;
 
   /// Provider for the base cache directory.
   final CacheDirectoryProvider _cacheDirectoryProvider;
@@ -391,27 +391,40 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final proceed = reqOutcome as HttpRequestProceed;
-    final client = _httpClientFactory();
+    SharedHttpClientResponse? clientResponse;
+    http.StreamedResponse? rawResponse;
     try {
-      final request = http.Request('GET', Uri.parse(proceed.data.url));
-      if (proceed.data.headers.isNotEmpty) {
-        request.headers.addAll(proceed.data.headers);
-      }
-
-      final connectionTimeout = connectionParameters?.connectionTimeout;
-      final rawResponse = connectionTimeout != null
-          ? await client.send(request).timeout(connectionTimeout)
-          : await client.send(request);
+      clientResponse = await _httpClient.send(
+        uri: Uri.parse(proceed.data.url),
+        headers: proceed.data.headers,
+        connectionTimeout: connectionParameters?.connectionTimeout,
+      );
+      final response = clientResponse.response;
+      rawResponse = response;
 
       // Splice 2: run onResponse chain — interceptors may replace the response
       final processedRes = await runOnResponseChain(
         _httpInterceptors,
-        HttpResponseData(response: rawResponse, originalUrl: url),
+        HttpResponseData(response: response, originalUrl: url),
       );
+      if (!identical(processedRes.response, response)) {
+        await _cancelResponseStream(response);
+        rawResponse = null;
+      }
+      if (processedRes.response.statusCode != 200 &&
+          processedRes.response.statusCode != 202) {
+        // _processResponse owns cancellation for invalid responses.
+        rawResponse = null;
+      }
 
       // _processResponse reads the stream; client must remain open until done
       yield* _processResponse(url, key, withProgress, processedRes);
     } catch (e, st) {
+      final response = rawResponse;
+      if (response != null) {
+        await _cancelResponseStream(response);
+      }
+
       // Splice 3: run onError chain for all errors (network, status, stream)
       final errorOutcome = await runOnErrorChain(_httpInterceptors, e, st);
       if (errorOutcome is HttpErrorResolved) {
@@ -421,8 +434,20 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final rethrow_ = errorOutcome as HttpErrorRethrow;
       Error.throwWithStackTrace(rethrow_.error, rethrow_.stackTrace);
     } finally {
-      // client.close() runs after the stream is consumed (normal path) or on error
-      client.close();
+      clientResponse?.release();
+    }
+  }
+
+  Future<void> _cancelResponseStream(http.StreamedResponse response) async {
+    try {
+      final subscription = response.stream.listen(
+        null,
+        onError: (Object _, StackTrace __) {},
+      );
+      await subscription.cancel();
+    } on StateError catch (_) {
+      // A downstream owner may already have consumed the single-subscription
+      // stream. Other cleanup failures should remain visible.
     }
   }
 
@@ -439,6 +464,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final response = resData.response;
 
     if (response.statusCode != 200 && response.statusCode != 202) {
+      await _cancelResponseStream(response);
       throw HttpExceptionWithStatus(
         response.statusCode,
         'Invalid statusCode: ${response.statusCode}',
@@ -710,6 +736,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         // Already logged inside _cleanupOldFiles; ignore here.
       }
     }
+
+    _httpClient.dispose();
 
     if (_cacheBox != null && _cacheBox!.isOpen) {
       try {

@@ -12,6 +12,7 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 
 import 'cache_entry_metadata.dart';
+import 'shared_http_client.dart';
 
 export 'cache_entry_metadata.dart';
 
@@ -48,7 +49,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
     @visibleForTesting HiveInterface? hiveInstance,
-  })  : _httpClientFactory = httpClientFactory ?? http.Client.new,
+  })  : _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
         _hive = hiveInstance ?? HiveImpl();
 
   /// Duration before cached files are considered stale.
@@ -68,8 +69,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// handled by the browser.
   final ConnectionParameters? connectionParameters;
 
-  /// Factory for creating HTTP clients.
-  final http.Client Function() _httpClientFactory;
+  final SharedHttpClient _httpClient;
 
   /// In-memory file system used to materialise cached bytes as [File] objects.
   final MemoryFileSystem _memFs = MemoryFileSystem();
@@ -250,17 +250,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       CacheManagerLogLevel.verbose,
     );
 
-    final request = http.Request('GET', Uri.parse(url));
-    if (headers != null) {
-      request.headers.addAll(headers);
-    }
-
-    final client = _httpClientFactory();
+    SharedHttpClientResponse? clientResponse;
     try {
-      final connectionTimeout = connectionParameters?.connectionTimeout;
-      final response = connectionTimeout != null
-          ? await client.send(request).timeout(connectionTimeout)
-          : await client.send(request);
+      clientResponse = await _httpClient.send(
+        uri: Uri.parse(url),
+        headers: headers,
+        connectionTimeout: connectionParameters?.connectionTimeout,
+      );
+      final response = clientResponse.response;
 
       if (response.statusCode != 200 && response.statusCode != 202) {
         throw HttpExceptionWithStatus(
@@ -310,7 +307,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final file = _bytesToFile(relativePath, allBytes);
       yield FileInfo(file, FileSource.Online, validTill, url);
     } finally {
-      client.close();
+      clientResponse?.release();
     }
   }
 
@@ -426,6 +423,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         // Ignore init errors during dispose.
       }
     }
+
+    _httpClient.dispose();
 
     if (_metaBox != null && _metaBox!.isOpen) {
       await _metaBox!.close();

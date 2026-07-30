@@ -8,6 +8,10 @@
 
 contributed by [@Chlx42](https://github.com/Chlx42) — thanks! (PR #58)
 
+## [4.9.1] - 2026-07-23
+
+* **Fix:** Codec decode failures (e.g. JXL, or AVIF/HEIC on platforms without native support) now route to `unsupportedImageBuilder` instead of `errorBuilder`. Previously only pre-detected formats (SVG) were routed this way via `UnsupportedImageFormatException`; any other codec decode failure fell through as a generic, untyped error.
+
 ## [4.9.0] - 2026-06-19
 
 * **Feature:** Added `metadataDirectoryProvider` to `DefaultCacheManager` so Hive metadata can be stored separately from cached image files on IO platforms.

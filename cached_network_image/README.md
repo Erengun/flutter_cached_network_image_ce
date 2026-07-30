@@ -250,12 +250,17 @@ When `onStore` rejects, the downloaded file is copied to a system-temp location,
 cache-directory copy is deleted (no orphan), and the temp copy is yielded to the caller for
 this request only.
 
-### SVG Support
+### Unsupported Image Formats (SVG, JXL, AVIF, HEIC, ...)
 
-Flutter's built-in image codec doesn't support SVG. When `CachedNetworkImage`
-detects SVG bytes it throws an `UnsupportedImageFormatException`. Use the
-`unsupportedImageBuilder` callback to render them with any SVG package you
-prefer (e.g. [`flutter_svg`](https://pub.dev/packages/flutter_svg)):
+Flutter's built-in image codec can't decode every format — SVG never works
+(it's not a raster format), and some raster formats (JXL, AVIF, HEIC, ...) may
+fail depending on platform/OS codec support. When `CachedNetworkImage` detects
+SVG bytes, or the codec otherwise fails to decode the cached bytes, it throws
+an `UnsupportedImageFormatException` instead of leaving you with an opaque
+decode error. Use the `unsupportedImageBuilder` callback to render the raw
+bytes with a format-specific package of your choice — e.g.
+[`flutter_svg`](https://pub.dev/packages/flutter_svg) for SVG, or
+[`flutter_avif`](https://pub.dev/packages/flutter_avif) for AVIF:
 
 Before using `SvgPicture.memory`, add `flutter_svg` to `pubspec.yaml`
 (`dependencies: flutter_svg: ^2.2.1`) and import
@@ -276,6 +281,20 @@ CachedNetworkImage(
 The image is still downloaded and cached normally — only the **rendering**
 path is different. If `unsupportedImageBuilder` is not set, the error falls
 through to `errorWidget` with an `UnsupportedImageFormatException`.
+
+SVG is detected ahead of time, so its exception carries
+`detectedFormat: 'svg'`. Any other codec decode failure (JXL, AVIF, HEIC, or a
+genuinely corrupt file) is only caught once decoding is actually attempted, so
+`detectedFormat` is `null` in that case — check the bytes yourself (e.g. magic
+numbers) if you need to distinguish which format/decoder to use inside
+`unsupportedImageBuilder`.
+
+**Web caveat:** this whole mechanism requires the raw cached bytes, so it only
+works with `ImageRenderMethodForWeb.HttpGet`. The default `HtmlImage` render
+method hands the URL straight to the browser's native image pipeline and never
+has bytes to inspect, so a decode failure there falls straight through to
+`errorBuilder`/`errorWidget` as a plain error, not an
+`UnsupportedImageFormatException`.
 
 ## ❓ FAQ
 

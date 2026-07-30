@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 
 /// Exception thrown when the image bytes cannot be decoded by Flutter's
-/// standard image codec (e.g. SVG images).
+/// standard image codec. This covers formats detected ahead of time (e.g.
+/// SVG images) as well as any other format the codec fails to decode at
+/// runtime (e.g. JXL, AVIF, or HEIC on platforms without native support).
 ///
 /// When caught, the [bytes] field contains the raw cached file bytes so that
 /// a custom renderer (such as `flutter_svg`) can display the image.

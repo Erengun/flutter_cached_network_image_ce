@@ -1,3 +1,7 @@
+## [2.1.2] - 2026-07-23
+
+* **Fix:** Codec decode failures now route to `unsupportedImageBuilder` instead of `errorBuilder`, matching the IO loader's behaviour. Previously only pre-detected formats (SVG) were routed this way.
+
 ## [2.1.1] - 2026-03-15
 
 * **Fix:** Enforce that HTTP headers can only be used with `HttpGet`. (PR #16)

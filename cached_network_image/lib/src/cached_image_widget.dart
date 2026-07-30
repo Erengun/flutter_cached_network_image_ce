@@ -112,7 +112,8 @@ class CachedNetworkImage extends StatefulWidget {
   final ImageErrorWidgetBuilder? errorBuilder;
 
   /// Builder for images whose format is not supported by Flutter's standard
-  /// image codec (e.g. SVG).
+  /// image codec (e.g. SVG, or any other format the codec fails to decode,
+  /// such as JXL, AVIF, or HEIC on platforms without native support).
   ///
   /// When set, the image is still downloaded and cached normally. If the
   /// cached bytes cannot be decoded as a raster image, this builder is called
@@ -122,6 +123,12 @@ class CachedNetworkImage extends StatefulWidget {
   /// If this is `null` and the image format is unsupported, the
   /// [errorWidget] builder is called instead (with an
   /// [UnsupportedImageFormatException]).
+  ///
+  /// On Flutter Web, this only applies when using
+  /// `ImageRenderMethodForWeb.HttpGet`. The default `HtmlImage` render
+  /// method decodes through the browser's native image pipeline and has no
+  /// access to the raw bytes, so decode failures there surface as a plain
+  /// error instead.
   final UnsupportedImageWidgetBuilder? unsupportedImageBuilder;
 
   /// The duration of the fade-in animation for the [placeholder].

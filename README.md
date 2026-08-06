@@ -33,6 +33,7 @@
 - [How we stack up](#how-we-stack-up)
 - [Architecture](#architecture)
 - [Benchmarks](#benchmarks)
+- [Used by](#used-by)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Full docs and advanced usage](#full-docs-and-advanced-usage)
@@ -117,9 +118,23 @@ Measured cache metadata operations (check, write, delete) on an iPhone Simulator
   <img src="https://raw.githubusercontent.com/Erengun/flutter_cached_network_image_ce/develop/simulator_benchmark.png" alt="Benchmark results on iPhone Simulator" width="320" />
 </p>
 
-<p align="center">
-  <img src="https://api.star-history.com/svg?repos=Erengun/flutter_cached_network_image_ce&type=Date" alt="Star history chart" width="600" />
-</p>
+## Used by
+
+Real apps shipping with `cached_network_image_ce`, found via a live GitHub code search for `pubspec.yaml` files that depend on it, sorted by stars:
+
+| Project | Stars | What it is |
+|---|---|---|
+| [Kazumi](https://github.com/Predidit/Kazumi) | ![stars](https://img.shields.io/github/stars/Predidit/Kazumi?style=flat-square&label=%20) | Rule-based anime scraper and streaming app with danmaku and real-time super-resolution. |
+| [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) | ![stars](https://img.shields.io/github/stars/bggRGjQaUbCoE/PiliPlus?style=flat-square&label=%20) | Third-party Bilibili client built with Flutter. |
+| [plezy](https://github.com/edde746/plezy) | ![stars](https://img.shields.io/github/stars/edde746/plezy?style=flat-square&label=%20) | Cross-platform Plex and Jellyfin client. |
+| [conduit](https://github.com/cogwheel0/conduit) | ![stars](https://img.shields.io/github/stars/cogwheel0/conduit?style=flat-square&label=%20) | Native iOS/Android client for Open WebUI, OpenAI-compatible APIs, Ollama, and OpenRouter. |
+| [haka_comic](https://github.com/raoxwup/haka_comic) | ![stars](https://img.shields.io/github/stars/raoxwup/haka_comic?style=flat-square&label=%20) | Third-party, ad-free client for the PicACG (Bika/Pica) comics platform. |
+| [MusicPod](https://github.com/ubuntu-flutter-community/musicpod) | ![stars](https://img.shields.io/github/stars/ubuntu-flutter-community/musicpod?style=flat-square&label=%20) | Music, radio, TV, and podcast player for Ubuntu and macOS. |
+| [Fluxer](https://github.com/fluxerapp/flutter_client) | ![stars](https://img.shields.io/github/stars/fluxerapp/flutter_client?style=flat-square&label=%20) | Official mobile client for Fluxer. |
+| [jd_mall_flutter](https://github.com/GuoguoDad/jd_mall_flutter) | ![stars](https://img.shields.io/github/stars/GuoguoDad/jd_mall_flutter?style=flat-square&label=%20) | Flutter clone of a major Chinese e-commerce marketplace app. |
+| [BoxBox](https://github.com/BrightDV/BoxBox) | ![stars](https://img.shields.io/github/stars/BrightDV/BoxBox?style=flat-square&label=%20) | Unofficial Formula 1 and Formula E companion app. |
+
+Shipping something with it? [Open a PR](https://github.com/Erengun/flutter_cached_network_image_ce/pulls) and add yours, or check the [full, current list](https://github.com/search?q=cached_network_image_ce+filename%3Apubspec.yaml&type=code) yourself.
 
 ## Features
 

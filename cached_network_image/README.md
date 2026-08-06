@@ -1,11 +1,20 @@
-# Cached Network Image — Community Edition
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Erengun/flutter_cached_network_image_ce/develop/banner.svg" alt="cached_network_image_ce banner" width="100%" />
+</p>
 
-[![pub package](https://img.shields.io/pub/v/cached_network_image_ce.svg)](https://pub.dev/packages/cached_network_image_ce)
-[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  <a href="https://pub.dev/packages/cached_network_image_ce"><img src="https://img.shields.io/pub/v/cached_network_image_ce.svg?style=for-the-badge" alt="pub package"></a>
+  <a href="https://github.com/Erengun/flutter_cached_network_image_ce/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/Erengun/flutter_cached_network_image_ce/ci.yaml?branch=develop&style=for-the-badge&label=CI" alt="CI status"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-purple.svg?style=for-the-badge" alt="License: MIT"></a>
+</p>
+
+# Cached Network Image — Community Edition
 
 A Flutter library to show images from the internet and keep them in the cache directory.
 
-**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image).**
+**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image)** — powered by `hive_ce` instead of `sqflite` for up to 8x faster cache reads and zero-jank scrolling.
+
+📖 For the full pitch, architecture diagram, benchmarks, and package-vs-package comparison table, see the [repo README](https://github.com/Erengun/flutter_cached_network_image_ce#readme). This page is the complete API reference.
 
 ---
 

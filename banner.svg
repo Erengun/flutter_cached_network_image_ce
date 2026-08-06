@@ -1,0 +1,47 @@
+<svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cached Network Image Community Edition">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#241046"/>
+      <stop offset="55%" stop-color="#3a1573"/>
+      <stop offset="100%" stop-color="#0f6dff"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe066"/>
+      <stop offset="100%" stop-color="#ff9d2f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="320" fill="url(#bg)"/>
+
+  <circle cx="1080" cy="90" r="220" fill="url(#glow)"/>
+  <circle cx="140" cy="260" r="180" fill="url(#glow)"/>
+
+  <g stroke="#ffffff" stroke-opacity="0.06" stroke-width="1">
+    <line x1="0" y1="40" x2="1280" y2="40"/>
+    <line x1="0" y1="80" x2="1280" y2="80"/>
+    <line x1="0" y1="240" x2="1280" y2="240"/>
+    <line x1="0" y1="280" x2="1280" y2="280"/>
+  </g>
+
+  <g transform="translate(64,72)">
+    <path d="M46 0 L4 78 H36 L20 140 L92 52 H54 Z" fill="url(#bolt)"/>
+  </g>
+
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif" fill="#ffffff">
+    <text x="180" y="150" font-size="58" font-weight="800" letter-spacing="1">CACHED NETWORK IMAGE</text>
+    <text x="180" y="196" font-size="30" font-weight="700" fill="#ffe066" letter-spacing="6">COMMUNITY EDITION</text>
+    <text x="180" y="238" font-size="22" font-weight="500" fill="#d8d0ff" letter-spacing="0.5">Zero-jank image caching, powered by Hive CE ⚡</text>
+  </g>
+
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" font-size="20" fill="#ffffff" fill-opacity="0.85">
+    <text x="180" y="285">8x faster reads</text>
+    <text x="420" y="285">·</text>
+    <text x="450" y="285">4x faster writes</text>
+    <text x="700" y="285">·</text>
+    <text x="730" y="285">full web caching</text>
+  </g>
+</svg>

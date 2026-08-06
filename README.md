@@ -1,187 +1,156 @@
-# Cached Network Image — Community Edition
+<p align="center">
+  <img src="./banner.svg" alt="cached_network_image_ce banner" width="100%" />
+</p>
 
-[![pub package](https://img.shields.io/pub/v/cached_network_image_ce.svg)](https://pub.dev/packages/cached_network_image_ce)
-[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](opensource.org/licenses/MIT)
+<p align="center">
+  <a href="https://pub.dev/packages/cached_network_image_ce"><img src="https://img.shields.io/pub/v/cached_network_image_ce.svg?style=for-the-badge" alt="pub package"></a>
+  <a href="https://github.com/Erengun/flutter_cached_network_image_ce/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/Erengun/flutter_cached_network_image_ce/ci.yaml?branch=develop&style=for-the-badge&label=CI" alt="CI status"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-purple.svg?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://github.com/Erengun/flutter_cached_network_image_ce/stargazers"><img src="https://img.shields.io/github/stars/Erengun/flutter_cached_network_image_ce?style=for-the-badge&color=yellow" alt="GitHub stars"></a>
+  <a href="https://github.com/sponsors/Erengun"><img src="https://img.shields.io/github/sponsors/Erengun?style=for-the-badge&logo=githubsponsors&color=ea4aaa" alt="GitHub Sponsors"></a>
+</p>
 
-A Flutter library to show images from the internet and keep them in the cache directory. 
+<p align="center">
+  <img src="https://img.shields.io/badge/powered%20by-hive__ce-ffb300?style=flat-square" alt="Powered by hive_ce">
+  <img src="https://img.shields.io/badge/cache%20reads-8x%20faster-brightgreen?style=flat-square" alt="8x faster cache reads">
+  <img src="https://img.shields.io/badge/platforms-android%20|%20ios%20|%20web%20|%20macos%20|%20windows%20|%20linux-blue?style=flat-square" alt="Platform support">
+</p>
 
-**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image).**
+<h1 align="center">Zero-jank image caching for Flutter. No excuses.</h1>
 
----
-
-## 📖 The Story: Why this fork?
-
-The original `cached_network_image` package by Baseflow is a titan in the Flutter ecosystem, used by millions. However, it has been **effectively unmaintained since August 2024**, leaving over 300 issues unresolved, including critical memory leaks and scroll performance bugs.
-
-As the Flutter ecosystem evolved, the original architecture began to show its age. It relied on `sqflite` for cache management—a heavy, SQL-based solution that requires platform channels to communicate with native code. For a simple task like "checking if an image exists," this overhead caused UI jank in heavy lists.
-
-**We created the Community Edition (`_ce`) to fix this.**
-
-We didn't just fork it to merge dependabot PRs. We re-engineered the caching layer.
-
-### ⚡ The Architectural Shift: SQLite vs. Hive
-
-We replaced the heavy `sqflite` dependency with **[`hive_ce`](https://pub.dev/packages/hive_ce)**. 
-
-* **Old Way (`sqflite`):** serialized data → Platform Channel → Java/Obj-C → SQLite → Disk. (Slow, blocking).
-* **New Way (`hive_ce`):** Dart Memory → Direct Disk Access. (Instant, non-blocking).
-
-The result? **Zero-jank scrolling.**
-
-### 🚀 Benchmarks
-
-We benchmarked the cache metadata operations (checking, writing, and deleting cache entries) on an iPhone Simulator. The results speak for themselves:
-
-| Operation | Payload Size | Original (`sqflite`) | **CE (`hive_ce`)** | **Improvement** |
-| :--- | :--- | :--- | :--- | :--- |
-| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | ⚡ **8.00x Faster** |
-| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | 🚀 **4.00x Faster** |
-| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | 🧹 **2.89x Faster** |
-| **Read (Large)** | 1 MB | 8 ms | **1 ms** | ⚡ **8.00x Faster** |
-
-*Note: "Read" is the most critical operation for scrolling performance, as every list item checks the cache before rendering.*
-
-![Benchmark Results](simulator_benchmark.png)
+<p align="center">
+  <b>cached_network_image_ce</b> is the actively maintained, re-engineered fork of
+  <a href="https://pub.dev/packages/cached_network_image"><code>cached_network_image</code></a>.
+  Same API you already know. A caching engine that doesn't block your UI thread anymore. 🚀
+</p>
 
 ---
+
+## 📚 Table of Contents
+
+- [Why This Fork Exists](#-why-this-fork-exists)
+- [How We Stack Up](#-how-we-stack-up)
+- [Architecture](#-architecture)
+- [Benchmarks](#-benchmarks)
+- [Features](#-features)
+- [Quick Start](#-quick-start)
+- [Full Docs](#-full-docs--advanced-usage)
+- [FAQ](#-faq)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+## 🔥 Why This Fork Exists
+
+`cached_network_image` by Baseflow is a titan of the Flutter ecosystem — millions of installs, everyone's default choice. But it's been **effectively unmaintained since August 2024**, sitting on 300+ open issues, including memory leaks and scroll-performance bugs that never got fixed.
+
+Under the hood it leaned on `sqflite` for cache metadata — a full SQL engine routed through a platform channel just to answer "have I already downloaded this image?" On image-heavy lists, that overhead shows up as jank you can feel.
+
+**We didn't fork this to babysit dependabot PRs. We re-engineered the caching layer.**
+
+We swapped `sqflite` for **[`hive_ce`](https://pub.dev/packages/hive_ce)** — a pure-Dart, non-blocking key-value store. No platform channel round-trip, no SQL parser, no jank.
+
+## ⚔️ How We Stack Up
+
+**vs. the original `cached_network_image`:**
+
+| | Original (`cached_network_image`) | **This fork (`cached_network_image_ce`)** |
+|---|:---:|:---:|
+| Cache backend | sqflite (platform channel) | ✅ hive_ce (pure Dart) |
+| Maintenance | ❌ stale since Aug 2024 | ✅ active, regular releases |
+| Web caching | ⚠️ browser cache only | ✅ full persistent IndexedDB cache |
+| HTTP / cache interceptors | ❌ | ✅ full chains (auth, logging, custom responses) |
+| Cache eviction | ❌ fixed | ✅ pluggable — TTL or LRU |
+| Cache read (10 KB) | 16 ms | ✅ **2 ms — 8x faster** |
+| Unsupported formats (SVG/AVIF/HEIC) | ❌ opaque decode error | ✅ `unsupportedImageBuilder` hook |
+
+**vs. other popular alternatives** *(checked live against pub.dev — no guessing):*
+
+| Package | Cache backend | Web support | Interceptors | Cleanup strategy | Maintenance |
+|---|---|:---:|:---:|:---:|:---:|
+| **cached_network_image_ce** (this) | hive_ce | ✅ full IndexedDB | ✅ HTTP + cache | ✅ TTL / LRU | ✅ active |
+| `cached_network_image` | sqflite | ⚠️ browser only | ❌ | ❌ fixed | ❌ stale |
+| `flutter_cache_manager` | sqflite / plain JSON | ✅ | ❌ | ❌ fixed | ✅ active |
+| `extended_image` | undisclosed | ✅ | ⚠️ headers/retry only | ⚠️ manual clear | ✅ active |
+| `fast_cached_network_image` | hive (plain) | ✅ (claimed) | ❌ | ⚠️ TTL only | ⚠️ stale (17mo) |
+
+> **We're honest about it:** `flutter_cache_manager` and `extended_image` are both actively maintained by reputable teams — they're just solving different problems (a generic file cache, and a broad image/gesture toolkit, respectively). The "actively maintained fork" pitch is specifically against the **original `cached_network_image`**, which this package is a drop-in replacement for.
+
+## 🏗 Architecture
+
+```mermaid
+flowchart LR
+    W[CachedNetworkImage widget] --> P[CachedNetworkImageProvider]
+    P --> M[DefaultCacheManager]
+    M --> H[("Hive CE<br/>metadata: URL, path,<br/>validTill, eTag")]
+    M --> FS[("Native filesystem<br/>raw image bytes")]
+    H -.cache hit.-> P
+    FS -.cache hit.-> P
+
+    subgraph Original[Original package — for comparison]
+        direction LR
+        W2[CachedNetworkImage] --> M2[CacheManager]
+        M2 --> PC[Platform Channel]
+        PC --> SQL[(SQLite via sqflite)]
+    end
+```
+
+* **Old way:** Dart → platform channel → native SQLite → disk. Slow, blocking.
+* **New way:** Dart → Hive CE (pure Dart, non-blocking) → disk. Instant.
+
+The result: **zero-jank scrolling**, even in image-dense lists.
+
+## 🚀 Benchmarks
+
+Measured cache metadata operations (check / write / delete) on an iPhone Simulator:
+
+| Operation | Payload | Original (`sqflite`) | **CE (`hive_ce`)** | Improvement |
+|---|---|---|---|---|
+| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | ⚡ **8.00x faster** |
+| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | 🚀 **4.00x faster** |
+| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | 🧹 **2.89x faster** |
+| **Read (Large)** | 1 MB | 8 ms | **1 ms** | ⚡ **8.00x faster** |
+
+*"Read" matters most for scroll performance — every list item checks the cache before rendering.*
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Erengun/flutter_cached_network_image_ce/develop/simulator_benchmark.png" alt="Benchmark results on iPhone Simulator" width="320" />
+</p>
+
+<p align="center">
+  <img src="https://api.star-history.com/svg?repos=Erengun/flutter_cached_network_image_ce&type=Date" alt="Star history chart" width="600" />
+</p>
 
 ## 🛠 Features
 
-* **Drop-in Replacement:** 99% API compatible with the original package.
-* **High Performance:** Powered by `hive_ce` for instant cache lookups.
-* **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
-* **True Web Support:** Unlike the original package, CE provides **full, persistent image caching** on the Web via IndexedDB (`hive_ce`), completely avoiding RAM freezes by using native image decoding sizes.
+- **Drop-in replacement** — 99% API compatible with the original package.
+- **hive_ce powered** — instant, non-blocking cache lookups.
+- **Real web support** — persistent IndexedDB caching, not just browser HTTP cache.
+- **HTTP & cache interceptors** — inject auth headers, logging, or synthetic responses without forking anything.
+- **Pluggable eviction** — TTL (default) or LRU cleanup strategies.
+- **Graceful unsupported-format handling** — SVG/AVIF/HEIC decode failures route to `unsupportedImageBuilder` instead of a bare exception.
+- **Actively maintained** — regular releases, community-driven roadmap.
 
-## 📦 Installation
+## ⚡ Quick Start
 
-Add `cached_network_image_ce` to your `pubspec.yaml`:
-
-```yaml
-dependencies:
-  cached_network_image_ce: ^1.0.0
-
+```sh
+flutter pub add cached_network_image_ce
 ```
-
-## 💻 How to use
-
-The API is identical to the original package. You can use `CachedNetworkImage` directly or via `ImageProvider`.
-
-### Basic Usage with Placeholder
 
 ```dart
 import 'package:cached_network_image_ce/cached_network_image.dart';
 
 CachedNetworkImage(
-  imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
-  placeholder: (context, url) => CircularProgressIndicator(),
-  errorWidget: (context, url, error) => Icon(Icons.error),
-),
-
+  imageUrl: 'https://example.com/image.jpg',
+  placeholder: (context, url) => const CircularProgressIndicator(),
+  errorWidget: (context, url, error) => const Icon(Icons.error),
+)
 ```
 
-### With Progress Indicator
+## 📖 Full Docs & Advanced Usage
 
-```dart
-CachedNetworkImage(
-  imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
-  progressIndicatorBuilder: (context, url, downloadProgress) =>
-      CircularProgressIndicator(value: downloadProgress.progress),
-  errorWidget: (context, url, error) => Icon(Icons.error),
-),
+The Quick Start above covers the basics — for the complete reference (HTTP/cache interceptors, cleanup strategies, connection timeouts, custom cache/metadata directories, web render modes, unsupported-format handling), head to:
 
-```
-
-### Advanced Usage (ImageBuilder)
-
-Use this when you need an `ImageProvider` for things like `DecorationImage`:
-
-```dart
-CachedNetworkImage(
-  imageUrl: '[https://via.placeholder.com/200x150](https://via.placeholder.com/200x150)',
-  imageBuilder: (context, imageProvider) => Container(
-    decoration: BoxDecoration(
-      image: DecorationImage(
-        image: imageProvider,
-        fit: BoxFit.cover,
-        colorFilter: ColorFilter.mode(Colors.red, BlendMode.colorBurn),
-      ),
-    ),
-  ),
-  placeholder: (context, url) => CircularProgressIndicator(),
-  errorWidget: (context, url, error) => Icon(Icons.error),
-),
-
-```
-
-### Direct ImageProvider Usage
-
-```dart
-Image(image: CachedNetworkImageProvider(url))
-
-```
-
-### HTTP Interceptors
-
-Intercept and modify HTTP requests, responses, and errors before they reach the cache layer:
-
-```dart
-class AuthInterceptor extends HttpInterceptor {
-  @override
-  void onRequest(HttpRequestData request, HttpRequestHandler handler) {
-    request.headers['Authorization'] = 'Bearer $token';
-    handler.next(request);
-  }
-}
-
-final manager = DefaultCacheManager(
-  httpInterceptors: [AuthInterceptor()],
-);
-```
-
-### Cache Interceptors (native IO only)
-
-Control cache hit, miss, and store events:
-
-```dart
-class NoCacheInterceptor extends CacheInterceptor {
-  @override
-  void onStore(CacheStoreData data, CacheStoreHandler handler) {
-    handler.reject(); // skip persisting this image
-  }
-}
-
-final manager = DefaultCacheManager(
-  cacheInterceptors: [NoCacheInterceptor()],
-);
-```
-
-Available hooks:
-
-| Hook | Trigger | Actions |
-| :--- | :--- | :--- |
-| `onHit` | Cached entry found | `next` · `resolve(fileInfo)` · `reject` (force re-download) |
-| `onMiss` | No cached entry | `next` · `resolve(fileInfo)` (skip download) |
-| `onStore` | Before writing to cache index | `next` · `reject` (skip persisting) |
-
-> `CacheInterceptor` is not available on web targets.
-
-### Cache Cleanup Strategy
-
-Control which entries are evicted first when the cache exceeds `maxNrOfCacheObjects`:
-
-```dart
-final manager = DefaultCacheManager(
-  maxNrOfCacheObjects: 200,
-  cleanupStrategy: const LruCleanupStrategy(),
-);
-```
-
-| Strategy | Eviction order | Default |
-| :--- | :--- | :--- |
-| `TtlCleanupStrategy` | Soonest-to-expire (`validTill`) first | ✅ |
-| `LruCleanupStrategy` | Least-recently-used (`touchedAt`) first | |
-
-`LruCleanupStrategy` relies on `touchedAt`, which is updated on every cache hit. Legacy entries written before this field existed fall back to `validTill` ordering. Implement `CleanupStrategy` for a custom eviction policy.
+### 👉 [`cached_network_image/README.md`](cached_network_image/README.md)
 
 ## ❓ FAQ
 
@@ -191,9 +160,9 @@ A: Yes. Because we switched the storage engine from SQLite to Hive, the old cach
 **Q: My app crashes/pauses on errors?**
 A: In Debug mode, Flutter may pause on exceptions even if they are caught. This is expected behavior for network errors (404s). In Release mode, these are handled silently by the `errorWidget`.
 
-**Q: Why is web caching slower or using Hive for image bytes?**
-A: On Mobile & Desktop (IO), this package stores image bytes directly on the incredibly fast native file system, and uses Hive *only* for metadata. The Web platform, however, lacks a native file system. Therefore, for web we use `hive_ce` to store both metadata and the actual image bytes in IndexedDB. Serializing large byte arrays in and out of IndexedDB introduces overhead that isn't present on IO. 
-*Alternative:* If persistent caching across sessions isn't critical for your web users, consider conditionally using the standard `Image.network` on the web, which relies on the browser's built-in memory/HTTP caching to achieve faster decoding.
+**Q: Why is web caching slower, or why does it use Hive for image bytes?**
+A: On Mobile & Desktop (IO), this package stores image bytes directly on the native file system and uses Hive *only* for metadata. Web lacks a native file system, so `hive_ce` stores both metadata and image bytes in IndexedDB there — serializing large byte arrays in and out of IndexedDB has overhead that doesn't exist on IO.
+*Alternative:* if persistent caching across sessions isn't critical for your web users, consider conditionally using `Image.network` on web, which relies on the browser's built-in caching.
 
 ## 🤝 Contributing
 
@@ -201,4 +170,4 @@ We welcome contributions! If you want to help maintain this essential package, p
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+MIT — see [LICENSE](LICENSE).

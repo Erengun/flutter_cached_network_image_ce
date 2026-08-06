@@ -4,73 +4,68 @@
 
 <p align="center">
   <a href="https://pub.dev/packages/cached_network_image_ce"><img src="https://img.shields.io/pub/v/cached_network_image_ce.svg?style=for-the-badge" alt="pub package"></a>
+  <a href="https://fluttergems.dev/packages/cached_network_image_ce/"><img src="https://img.shields.io/badge/listed%20on-Flutter%20Gems-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Listed on Flutter Gems"></a>
   <a href="https://github.com/Erengun/flutter_cached_network_image_ce/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/Erengun/flutter_cached_network_image_ce/ci.yaml?branch=develop&style=for-the-badge&label=CI" alt="CI status"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-purple.svg?style=for-the-badge" alt="License: MIT"></a>
 </p>
 
-# Cached Network Image — Community Edition
+# Cached Network Image (Community Edition)
 
 A Flutter library to show images from the internet and keep them in the cache directory.
 
-**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image)** — powered by `hive_ce` instead of `sqflite` for up to 8x faster cache reads and zero-jank scrolling.
+This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image), powered by `hive_ce` instead of `sqflite` for up to 8x faster cache reads and smoother scrolling.
 
-📖 For the full pitch, architecture diagram, benchmarks, and package-vs-package comparison table, see the [repo README](https://github.com/Erengun/flutter_cached_network_image_ce#readme). This page is the complete API reference.
+For the full pitch, architecture diagram, benchmarks, and package comparison table, see the [repo README](https://github.com/Erengun/flutter_cached_network_image_ce#readme). This page is the complete API reference.
 
 ---
 
-## 📖 The Story: Why this fork?
+## Why this fork exists
 
-The original `cached_network_image` package by Baseflow is a titan in the Flutter ecosystem, used by millions. However, it has been **effectively unmaintained since August 2024**, leaving over 300 issues unresolved, including critical memory leaks and scroll performance bugs.
+The original `cached_network_image` package by Baseflow is a titan in the Flutter ecosystem, used by millions. However, it has been effectively unmaintained since August 2024, leaving over 300 issues unresolved, including critical memory leaks and scroll performance bugs.
 
-As the Flutter ecosystem evolved, the original architecture began to show its age. It relied on `sqflite` for cache management—a heavy, SQL-based solution that requires platform channels to communicate with native code. For a simple task like "checking if an image exists," this overhead caused UI jank in heavy lists.
+As the Flutter ecosystem evolved, the original architecture began to show its age. It relied on `sqflite` for cache management: a heavy, SQL-based solution that requires platform channels to communicate with native code. For a simple task like "checking if an image exists," this overhead caused UI jank in heavy lists.
 
-**We created the Community Edition (`_ce`) to fix this.**
+We created the Community Edition (`_ce`) to fix this. We didn't just fork it to merge dependabot PRs. We re-engineered the caching layer.
 
-We didn't just fork it to merge dependabot PRs. We re-engineered the caching layer.
-
-### ⚡ The Architectural Shift: SQLite vs. Hive
+### The architectural shift: SQLite vs. Hive
 
 We replaced the heavy `sqflite` dependency with **[`hive_ce`](https://pub.dev/packages/hive_ce)**.
 
-* **Old Way (`sqflite`):** serialized data → Platform Channel → Java/Obj-C → SQLite → Disk. (Slow, blocking).
-* **New Way (`hive_ce`):** Dart Memory → Direct Disk Access. (Instant, non-blocking).
+* **Old way (`sqflite`):** serialized data → Platform Channel → Java/Obj-C → SQLite → Disk. Slow, blocking.
+* **New way (`hive_ce`):** Dart Memory → Direct Disk Access. Instant, non-blocking.
 
-The result? **Zero-jank scrolling.**
+The result: zero-jank scrolling.
 
-### 🚀 Benchmarks
+### Benchmarks
 
 We benchmarked the cache metadata operations (checking, writing, and deleting cache entries) on an iPhone Simulator. The results speak for themselves:
 
 | Operation | Payload Size | Original (`sqflite`) | **CE (`hive_ce`)** | **Improvement** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | ⚡ **8.00x Faster** |
-| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | 🚀 **4.00x Faster** |
-| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | 🧹 **2.89x Faster** |
-| **Read (Large)** | 1 MB | 8 ms | **1 ms** | ⚡ **8.00x Faster** |
+| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | **8.00x faster** |
+| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | **4.00x faster** |
+| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | **2.89x faster** |
+| **Read (Large)** | 1 MB | 8 ms | **1 ms** | **8.00x faster** |
 
 *Note: "Read" is the most critical operation for scrolling performance, as every list item checks the cache before rendering.*
 
 ---
 
-## 🛠 Features
+## Features
 
-* **Drop-in Replacement:** 99% API compatible with the original package.
-* **High Performance:** Powered by `hive_ce` for instant cache lookups.
-* **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
-* **True Web Support:** Unlike the original package, CE provides **full, persistent image caching** on the Web via IndexedDB (`hive_ce`), completely avoiding RAM freezes by using native image decoding sizes.
-* **Interceptors:** Full HTTP and cache interceptor chains — add auth headers, inject synthetic responses, or selectively skip caching without forking the package.
+It's a drop-in replacement, about 99% API compatible with the original package. Cache lookups go through `hive_ce`, so they're fast and non-blocking. Unlike the original package, it caches images fully and persistently on the web via IndexedDB, and avoids RAM spikes by decoding at native image sizes instead of full resolution. HTTP and cache interceptor chains let you add auth headers, inject synthetic responses, or skip caching selectively, all without forking the package. It's still getting regular updates and bug fixes too.
 
-## 📦 Installation
+## Installation
 
-Run the following command:
+Install with:
 
 ```sh
 flutter pub add cached_network_image_ce
 ```
 
-## 💻 How to use
+## How to use
 
-The API is identical to the original package. You can use `CachedNetworkImage` directly or via `ImageProvider`. Both approaches are fully supported with persistent IndexedDB caching on the web platform out-of-the-box.
+The API is identical to the original package. You can use `CachedNetworkImage` directly or via `ImageProvider`. Both approaches are fully supported with persistent IndexedDB caching on the web platform out of the box.
 
 ### Basic Usage with Placeholder
 
@@ -175,7 +170,7 @@ directory:
 ```
 
 **Web Platform Headers Support:** Custom headers (like `Authorization`) are
-**only supported with `ImageRenderMethodForWeb.HttpGet`**. The default
+only supported with `ImageRenderMethodForWeb.HttpGet`. The default
 `HtmlImage` render method does not support custom headers. If you need to
 send headers to authenticate image requests on Web, you must explicitly set:
 
@@ -226,7 +221,7 @@ Failing to call any will stall the pipeline permanently.
 ### Cache Interceptors
 
 Intercept cache hit, miss, and store events to control how entries are read from and written to
-the cache index. Only available on native IO targets (Android, iOS, macOS, Linux, Windows) — not
+the cache index. Only available on native IO targets (Android, iOS, macOS, Linux, Windows); not
 available on web.
 
 ```dart
@@ -261,13 +256,13 @@ this request only.
 
 ### Unsupported Image Formats (SVG, JXL, AVIF, HEIC, ...)
 
-Flutter's built-in image codec can't decode every format — SVG never works
+Flutter's built-in image codec can't decode every format. SVG never works
 (it's not a raster format), and some raster formats (JXL, AVIF, HEIC, ...) may
 fail depending on platform/OS codec support. When `CachedNetworkImage` detects
 SVG bytes, or the codec otherwise fails to decode the cached bytes, it throws
 an `UnsupportedImageFormatException` instead of leaving you with an opaque
 decode error. Use the `unsupportedImageBuilder` callback to render the raw
-bytes with a format-specific package of your choice — e.g.
+bytes with a format-specific package of your choice, for example
 [`flutter_svg`](https://pub.dev/packages/flutter_svg) for SVG, or
 [`flutter_avif`](https://pub.dev/packages/flutter_avif) for AVIF:
 
@@ -287,14 +282,14 @@ CachedNetworkImage(
 ),
 ```
 
-The image is still downloaded and cached normally — only the **rendering**
+The image is still downloaded and cached normally; only the rendering
 path is different. If `unsupportedImageBuilder` is not set, the error falls
 through to `errorWidget` with an `UnsupportedImageFormatException`.
 
 SVG is detected ahead of time, so its exception carries
 `detectedFormat: 'svg'`. Any other codec decode failure (JXL, AVIF, HEIC, or a
 genuinely corrupt file) is only caught once decoding is actually attempted, so
-`detectedFormat` is `null` in that case — check the bytes yourself (e.g. magic
+`detectedFormat` is `null` in that case. Check the bytes yourself (e.g. magic
 numbers) if you need to distinguish which format/decoder to use inside
 `unsupportedImageBuilder`.
 
@@ -305,7 +300,7 @@ has bytes to inspect, so a decode failure there falls straight through to
 `errorBuilder`/`errorWidget` as a plain error, not an
 `UnsupportedImageFormatException`.
 
-## ❓ FAQ
+## FAQ
 
 **Q: Will I lose my users' existing cache if I migrate?**
 A: Yes. Because we switched the storage engine from SQLite to Hive, the old cache files will be ignored. Users will re-download images once as they browse. This is a one-time migration cost for a permanent performance gain.
@@ -314,13 +309,13 @@ A: Yes. Because we switched the storage engine from SQLite to Hive, the old cach
 A: In Debug mode, Flutter may pause on exceptions even if they are caught. This is expected behavior for network errors (404s). In Release mode, these are handled silently by the `errorWidget`.
 
 **Q: Why is web caching slower or using Hive for image bytes?**
-A: On Mobile & Desktop (IO), this package stores image bytes directly on the incredibly fast native file system, and uses Hive *only* for metadata. The Web platform, however, lacks a native file system. Therefore, for web we use `hive_ce` to store both metadata and the actual image bytes in IndexedDB. Serializing large byte arrays in and out of IndexedDB introduces overhead that isn't present on IO. 
+A: On Mobile & Desktop (IO), this package stores image bytes directly on the native file system and uses Hive *only* for metadata. The Web platform, however, lacks a native file system. So for web we use `hive_ce` to store both metadata and the actual image bytes in IndexedDB. Serializing large byte arrays in and out of IndexedDB introduces overhead that isn't present on IO.
 *Alternative:* If persistent caching across sessions isn't critical for your web users, consider conditionally using the standard `Image.network` on the web, which relies on the browser's built-in memory/HTTP caching to achieve faster decoding.
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! If you want to help maintain this essential package, please check the [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License.

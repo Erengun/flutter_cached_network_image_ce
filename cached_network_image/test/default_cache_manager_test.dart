@@ -1,10 +1,15 @@
 import 'dart:async';
 import 'dart:io' as io;
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart'
     show LruCleanupStrategy, TtlCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
+import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart'
+    as io_loader;
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:file/file.dart' show File;
+import 'package:flutter/widgets.dart' show ImageChunkEvent;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
@@ -13,6 +18,7 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 
+import 'image_data.dart';
 import 'support/http_clients.dart';
 
 /// A custom object that forces Hive to write a user-defined typeId into
@@ -35,6 +41,93 @@ class _CorruptPayloadAdapter extends TypeAdapter<_CorruptPayload> {
   @override
   void write(BinaryWriter writer, _CorruptPayload obj) =>
       writer.writeString(obj.data);
+}
+
+/// Deletes the cached file out from under the first cache-sourced [FileInfo]
+/// it forwards, reproducing an eviction sweep that lands between the cache
+/// manager yielding the file and the consumer reading it.
+class _EvictBeforeReadManager extends CacheManager with ImageCacheManager {
+  _EvictBeforeReadManager(this._inner);
+
+  final DefaultCacheManager _inner;
+
+  int evictions = 0;
+
+  @override
+  Stream<FileResponse> getImageFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+    int? maxHeight,
+    int? maxWidth,
+  }) async* {
+    final stream = _inner.getImageFile(
+      url,
+      key: key,
+      headers: headers,
+      withProgress: withProgress,
+      maxHeight: maxHeight,
+      maxWidth: maxWidth,
+    );
+    await for (final response in stream) {
+      if (response is FileInfo &&
+          response.source == FileSource.Cache &&
+          evictions == 0) {
+        evictions++;
+        io.File(response.file.path).deleteSync();
+      }
+      yield response;
+    }
+  }
+
+  @override
+  Stream<FileResponse> getFileStream(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+  }) =>
+      _inner.getFileStream(
+        url,
+        key: key,
+        headers: headers,
+        withProgress: withProgress,
+      );
+
+  @override
+  Future<FileInfo?> getFileFromCache(
+    String key, {
+    bool ignoreMemCache = false,
+  }) =>
+      _inner.getFileFromCache(key, ignoreMemCache: ignoreMemCache);
+
+  @override
+  Future<File> putFile(
+    String url,
+    List<int> fileBytes, {
+    String? key,
+    String? eTag,
+    Duration maxAge = const Duration(days: 30),
+    String fileExtension = 'file',
+  }) =>
+      _inner.putFile(
+        url,
+        fileBytes,
+        key: key,
+        eTag: eTag,
+        maxAge: maxAge,
+        fileExtension: fileExtension,
+      );
+
+  @override
+  Future<void> removeFile(String key) => _inner.removeFile(key);
+
+  @override
+  Future<void> emptyCache() => _inner.emptyCache();
+
+  @override
+  Future<void> dispose() => _inner.dispose();
 }
 
 void main() {
@@ -1642,6 +1735,143 @@ void main() {
       expect(receivedAuth, 'Bearer xyz');
     });
 
+    test('recovers when a cached file is evicted before the image is read',
+        () async {
+      var requests = 0;
+      final inner = DefaultCacheManager(
+        httpClientFactory: () => http_testing.MockClient((request) async {
+          requests++;
+          return http.Response.bytes(kTransparentImage, 200);
+        }),
+      );
+      manager = inner;
+
+      const url = 'https://example.com/evicted-before-read.png';
+
+      // Prime the cache so the next load takes the cache-hit path.
+      await inner.getFileStream(url).toList();
+      expect(requests, 1);
+
+      // Reproduce the production interleaving: the eviction sweep deletes the
+      // file after getFileFromCache has handed out the FileInfo but before the
+      // image loader reads it.
+      final evicting = _EvictBeforeReadManager(inner);
+
+      final chunkEvents = StreamController<ImageChunkEvent>()
+        ..stream.listen((_) {});
+      final codecs = await io_loader.ImageLoader()
+          .loadImageAsync(
+            url,
+            null,
+            chunkEvents,
+            (ui.ImmutableBuffer buffer,
+                    {ui.TargetImageSizeCallback? getTargetSize}) async =>
+                ui.instantiateImageCodecFromBuffer(buffer),
+            evicting,
+            null,
+            null,
+            null,
+            ImageRenderMethodForWeb.HttpGet,
+            () {},
+          )
+          .toList()
+          .timeout(const Duration(seconds: 10));
+
+      expect(evicting.evictions, 1, reason: 'the race must have been staged');
+      expect(codecs, hasLength(1), reason: 'the image must still decode');
+      expect(requests, 2, reason: 'the refetch must have gone to the network');
+    });
+
+    test('recovers from eviction on the resize path too', () async {
+      var requests = 0;
+      final inner = DefaultCacheManager(
+        httpClientFactory: () => http_testing.MockClient((request) async {
+          requests++;
+          return http.Response.bytes(kTransparentImage, 200);
+        }),
+      );
+      manager = inner;
+
+      const url = 'https://example.com/evicted-resize-path.png';
+
+      await inner.getFileStream(url).toList();
+      expect(requests, 1);
+
+      final evicting = _EvictBeforeReadManager(inner);
+
+      final chunkEvents = StreamController<ImageChunkEvent>()
+        ..stream.listen((_) {});
+      final codecs = await io_loader.ImageLoader()
+          .loadImageAsync(
+            url,
+            null,
+            chunkEvents,
+            (ui.ImmutableBuffer buffer,
+                    {ui.TargetImageSizeCallback? getTargetSize}) async =>
+                ui.instantiateImageCodecFromBuffer(buffer),
+            evicting,
+            null,
+            1,
+            null,
+            ImageRenderMethodForWeb.HttpGet,
+            () {},
+          )
+          .toList()
+          .timeout(const Duration(seconds: 10));
+
+      expect(evicting.evictions, 1, reason: 'the race must have been staged');
+      expect(codecs, hasLength(1), reason: 'the image must still decode');
+    });
+
+    test('recovers when an expired cached file is evicted before the read',
+        () async {
+      var requests = 0;
+      final inner = DefaultCacheManager(
+        httpClientFactory: () => http_testing.MockClient((request) async {
+          requests++;
+          return http.Response.bytes(kTransparentImage, 200);
+        }),
+      );
+      manager = inner;
+
+      const url = 'https://example.com/evicted-expired.png';
+
+      // An already-expired entry makes _pushFileToStream emit the stale
+      // FileInfo and then carry on downloading, so the refetch happens while
+      // the first request is still in flight.
+      await inner.putFile(url, kTransparentImage,
+          maxAge: Duration.zero, fileExtension: 'png');
+
+      final evicting = _EvictBeforeReadManager(inner);
+
+      final chunkEvents = StreamController<ImageChunkEvent>()
+        ..stream.listen((_) {});
+      final codecs = await io_loader.ImageLoader()
+          .loadImageAsync(
+            url,
+            null,
+            chunkEvents,
+            (ui.ImmutableBuffer buffer,
+                    {ui.TargetImageSizeCallback? getTargetSize}) async =>
+                ui.instantiateImageCodecFromBuffer(buffer),
+            evicting,
+            null,
+            null,
+            null,
+            ImageRenderMethodForWeb.HttpGet,
+            () {},
+          )
+          .toList()
+          .timeout(const Duration(seconds: 10));
+
+      expect(evicting.evictions, 1, reason: 'the race must have been staged');
+      expect(codecs, isNotEmpty, reason: 'the image must still decode');
+      expect(requests, greaterThanOrEqualTo(1));
+
+      // Let any download abandoned by the refetch finish writing.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+
     test('uses key parameter', () async {
       manager = DefaultCacheManager(
         httpClientFactory: () => http_testing.MockClient(
@@ -1695,6 +1925,111 @@ void main() {
   // ---- _cleanupOldFiles tests ----
 
   group('DefaultCacheManager._cleanupOldFiles', () {
+    test('does not evict an entry that was just served to a caller', () async {
+      final dir = io.Directory.systemTemp.createTempSync('evict_guard_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        maxNrOfCacheObjects: 2,
+        cacheDirectoryProvider: () async => dir,
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+
+      // TtlCleanupStrategy evicts the earliest validTill first, so 'soonest'
+      // is the natural victim.
+      await manager.putFile('https://example.com/a.png', [1],
+          key: 'soonest', maxAge: const Duration(hours: 1));
+      await manager.putFile('https://example.com/b.png', [2],
+          key: 'middle', maxAge: const Duration(hours: 2));
+      await manager.putFile('https://example.com/c.png', [3],
+          key: 'latest', maxAge: const Duration(hours: 3));
+
+      // Serving it hands a file path to a caller that has not read it yet.
+      expect(await manager.getFileFromCache('soonest'), isNotNull);
+
+      await manager.debugRunCleanup();
+
+      expect(await manager.getFileFromCache('soonest'), isNotNull,
+          reason: 'an entry just handed out must not be evicted');
+      expect(await manager.getFileFromCache('middle'), isNull,
+          reason: 'the next eligible entry is evicted instead');
+      expect(await manager.getFileFromCache('latest'), isNotNull);
+    });
+
+    test('served-entry bookkeeping keeps live entries and clears on dispose',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('served_bound_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        maxNrOfCacheObjects: 1000,
+        cacheDirectoryProvider: () async => dir,
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+
+      for (var i = 0; i < 200; i++) {
+        await manager.putFile('https://example.com/$i.png', [i], key: 'k$i');
+        expect(await manager.getFileFromCache('k$i'), isNotNull);
+      }
+
+      // Everything here was served inside the grace period, so nothing can be
+      // dropped yet; the point is that the sweep runs and the map cannot grow
+      // without ever being revisited.
+      expect(manager.debugRecentlyServedCount, 200);
+
+      await manager.dispose();
+      expect(manager.debugRecentlyServedCount, 0);
+    });
+
+    test('still evicts down to maxNrOfCacheObjects when nothing was served',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('evict_plain_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        maxNrOfCacheObjects: 2,
+        cacheDirectoryProvider: () async => dir,
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+
+      await manager.putFile('https://example.com/a.png', [1],
+          key: 'soonest', maxAge: const Duration(hours: 1));
+      await manager.putFile('https://example.com/b.png', [2],
+          key: 'middle', maxAge: const Duration(hours: 2));
+      await manager.putFile('https://example.com/c.png', [3],
+          key: 'latest', maxAge: const Duration(hours: 3));
+
+      await manager.debugRunCleanup();
+
+      expect(await manager.getFileFromCache('soonest'), isNull);
+      expect(await manager.getFileFromCache('middle'), isNotNull);
+      expect(await manager.getFileFromCache('latest'), isNotNull);
+    });
+
     test('removes expired entries during initialization', () async {
       // First, put an entry with zero stale period
       final manager1 = DefaultCacheManager(

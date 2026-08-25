@@ -30,6 +30,11 @@ const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
 const _kOrphanFileGracePeriod = Duration(minutes: 5);
+const _kServedEntryGracePeriod = Duration(seconds: 30);
+
+/// Size at which [DefaultCacheManager._recentlyServed] is swept for expired
+/// entries. Only a bound on bookkeeping, not on how many entries are guarded.
+const _kServedEntryPruneThreshold = 64;
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico'];
 
@@ -114,6 +119,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   Box<Map>? _cacheBox;
   String? _cacheDir;
+
+  /// Box keys handed out to a caller recently, with the time they were served.
+  ///
+  /// A [FileInfo] only carries a path, so the caller reads the file some time
+  /// after [getFileFromCache] returns. Evicting one of these in the meantime
+  /// leaves the caller holding a path to a file that no longer exists, so the
+  /// cleanup sweep leaves them alone for [_kServedEntryGracePeriod].
+  final Map<String, DateTime> _recentlyServed = {};
 
   /// Guards [_doInit] so that concurrent callers (e.g. multiple images
   /// loading at the same time on cold start) share the same init future.
@@ -610,10 +623,32 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     final localFile = const LocalFileSystem().file(filePath);
+    _markServed(_sanitizeBoxKey(key));
     unawaited(_touchEntry(key));
     return FileInfo(
         localFile, FileSource.Cache, metadata.validTill, metadata.url);
   }
+
+  /// Records that [sanitizedKey] was handed to a caller, and drops entries
+  /// that have outlived the grace period once the map has grown enough to be
+  /// worth sweeping.
+  void _markServed(String sanitizedKey) {
+    final now = DateTime.now();
+    _recentlyServed[sanitizedKey] = now;
+    if (_recentlyServed.length > _kServedEntryPruneThreshold) {
+      _pruneRecentlyServed(now);
+    }
+  }
+
+  void _pruneRecentlyServed(DateTime now) {
+    _recentlyServed.removeWhere(
+      (_, servedAt) => now.difference(servedAt) >= _kServedEntryGracePeriod,
+    );
+  }
+
+  /// Number of entries currently protected from eviction. Test-only.
+  @visibleForTesting
+  int get debugRecentlyServedCount => _recentlyServed.length;
 
   /// Updates the [touchedAt] timestamp for [key] in the cache box.
   ///
@@ -669,7 +704,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await file.writeAsBytes(fileBytes);
 
     final validTill = DateTime.now().add(maxAge);
-    _cacheBox!.put(
+    await _cacheBox!.put(
         _sanitizeBoxKey(key),
         CacheEntryMetadata(
           url: url,
@@ -753,16 +788,26 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       // Ignore errors when closing Hive (e.g. residual lock file already gone).
     }
 
+    _recentlyServed.clear();
     _cacheBox = null;
     _cacheDir = null;
     _initCompleter = null;
     _cleanupFuture = null;
   }
 
+  /// Runs the eviction sweep synchronously, for tests that need to observe
+  /// its result without racing the unawaited sweep started by [_doInit].
+  @visibleForTesting
+  Future<void> debugRunCleanup() async {
+    await _ensureInitialized();
+    await _cleanupOldFiles();
+  }
+
   /// Clean up files that haven't been used in a while.
   Future<void> _cleanupOldFiles() async {
     try {
       final now = DateTime.now();
+      _pruneRecentlyServed(now);
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
       for (final key in _cacheBox!.keys.toList()) {
@@ -779,12 +824,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       // Remove expired entries
       for (final entry in entries) {
-        if (entry.value.validTill.isBefore(now)) {
-          final file = io.File(_cacheFilePath(entry.value.relativePath));
-          if (await file.exists()) {
-            await file.delete();
-          }
-          await _cacheBox!.delete(entry.key);
+        if (entry.value.validTill.isBefore(now) &&
+            !_recentlyServed.containsKey(entry.key)) {
+          await _evictEntry(entry);
         }
       }
 
@@ -795,13 +837,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         );
 
         final toRemove = sortedEntries.length - maxNrOfCacheObjects;
-        for (var i = 0; i < toRemove; i++) {
-          final entry = sortedEntries[i];
-          final file = io.File(_cacheFilePath(entry.value.relativePath));
-          if (await file.exists()) {
-            await file.delete();
-          }
-          await _cacheBox!.delete(entry.key);
+        var removed = 0;
+        for (final entry in sortedEntries) {
+          if (removed >= toRemove) break;
+          // Skip rather than stop, so a recently served entry costs the cache
+          // its place in the eviction order but not the size budget.
+          if (_recentlyServed.containsKey(entry.key)) continue;
+          await _evictEntry(entry);
+          removed++;
         }
       }
     } on Object catch (e) {
@@ -810,6 +853,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         CacheManagerLogLevel.warning,
       );
     }
+  }
+
+  /// Deletes the cached file for [entry] and then its metadata record.
+  Future<void> _evictEntry(MapEntry<String, CacheEntryMetadata> entry) async {
+    final file = io.File(_cacheFilePath(entry.value.relativePath));
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await _cacheBox!.delete(entry.key);
   }
 
   Future<void> _deleteOrphanedCacheFiles(
@@ -890,8 +942,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       ).asBroadcastStream();
       _runningResizes[resizedKey] = runningResize;
     }
-    yield* runningResize;
-    _runningResizes.remove(resizedKey);
+    try {
+      yield* runningResize;
+    } finally {
+      // A consumer can abandon this stream early (for example the image
+      // loader refetching after a cached file was evicted mid-read). Without
+      // this, the entry would outlive its now-completed broadcast stream and
+      // every later call for the same key would attach to it and never emit.
+      if (_runningResizes[resizedKey] == runningResize) {
+        _runningResizes.remove(resizedKey);
+      }
+    }
   }
 
   Stream<FileResponse> _fetchedResizedFile(

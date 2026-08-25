@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show PathNotFoundException;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:ui';
@@ -92,51 +93,90 @@ class ImageLoader implements platform.ImageLoader {
           'CacheManager needs to be an ImageCacheManager. maxWidth and '
           'maxHeight will be ignored when a normal CacheManager is used.');
 
-      final stream = cacheManager is ImageCacheManager
-          ? cacheManager.getImageFile(
-              url,
-              maxHeight: maxHeight,
-              maxWidth: maxWidth,
-              withProgress: true,
-              headers: headers,
-              key: cacheKey,
-            )
-          : cacheManager.getFileStream(
-              url,
-              withProgress: true,
-              headers: headers,
-              key: cacheKey,
-            );
+      // A cache manager can delete a cached file during its own eviction
+      // sweep after it has already handed out the FileInfo pointing at it,
+      // which leaves the read below throwing PathNotFoundException for a file
+      // the cache reported as valid. Fetching again turns that into an
+      // ordinary cache miss and a fresh download. One extra attempt only, so
+      // a genuinely unreadable cache directory cannot spin.
+      var mayRefetch = true;
+      var refetch = true;
 
-      await for (final result in stream) {
-        if (result is DownloadProgress) {
-          chunkEvents.add(
-            ImageChunkEvent(
-              cumulativeBytesLoaded: result.downloaded,
-              expectedTotalBytes: result.totalSize,
-            ),
-          );
-        }
-        if (result is FileInfo) {
-          final file = result.file;
-          final bytes = await file.readAsBytes();
-          final unsupportedFormat =
-              ImageFormatDetector.detectUnsupportedFormat(bytes);
-          if (unsupportedFormat != null) {
-            throw UnsupportedImageFormatException(
-              bytes: bytes,
-              url: url,
-              detectedFormat: unsupportedFormat,
-            );
+      while (refetch) {
+        refetch = false;
+
+        final stream = cacheManager is ImageCacheManager
+            ? cacheManager.getImageFile(
+                url,
+                maxHeight: maxHeight,
+                maxWidth: maxWidth,
+                withProgress: true,
+                headers: headers,
+                key: cacheKey,
+              )
+            : cacheManager.getFileStream(
+                url,
+                withProgress: true,
+                headers: headers,
+                key: cacheKey,
+              );
+
+        // Set when the read below already ruled a refetch out, so the handler
+        // around the loop does not second-guess that as the error unwinds.
+        var refetchDeclined = false;
+        try {
+          await for (final result in stream) {
+            if (result is DownloadProgress) {
+              chunkEvents.add(
+                ImageChunkEvent(
+                  cumulativeBytesLoaded: result.downloaded,
+                  expectedTotalBytes: result.totalSize,
+                ),
+              );
+            }
+            if (result is FileInfo) {
+              final file = result.file;
+              Uint8List? bytes;
+              try {
+                bytes = await file.readAsBytes();
+              } on PathNotFoundException {
+                // Only a cached file can be evicted out from under us. A
+                // missing file on a just-downloaded result is a different
+                // defect and must stay visible.
+                if (!mayRefetch || result.source != FileSource.Cache) {
+                  refetchDeclined = true;
+                  rethrow;
+                }
+                refetch = true;
+              }
+              if (bytes == null) break;
+              final unsupportedFormat =
+                  ImageFormatDetector.detectUnsupportedFormat(bytes);
+              if (unsupportedFormat != null) {
+                throw UnsupportedImageFormatException(
+                  bytes: bytes,
+                  url: url,
+                  detectedFormat: unsupportedFormat,
+                );
+              }
+              final ui.Codec decoded;
+              try {
+                decoded = await decode(bytes);
+              } catch (_) {
+                throw UnsupportedImageFormatException(bytes: bytes, url: url);
+              }
+              yield decoded;
+            }
           }
-          final ui.Codec decoded;
-          try {
-            decoded = await decode(bytes);
-          } catch (_) {
-            throw UnsupportedImageFormatException(bytes: bytes, url: url);
-          }
-          yield decoded;
+        } on PathNotFoundException {
+          // The same race, reached while the cache manager itself read a
+          // cached file: resizing reads the original entry, which is
+          // separately evictable.
+          if (!mayRefetch || refetchDeclined) rethrow;
+          refetch = true;
         }
+
+        if (refetch) mayRefetch = false;
       }
     } on Object catch (error, stackTrace) {
       // Depending on where the exception was thrown, the image cache may not

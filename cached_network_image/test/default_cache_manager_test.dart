@@ -8,9 +8,8 @@ import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart'
     as io_loader;
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
-import 'package:file/file.dart' show File;
-import 'package:flutter/widgets.dart' show ImageChunkEvent;
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show ImageChunkEvent;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 // ignore: implementation_imports
@@ -18,6 +17,7 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
 
+import 'fake_cache_manager.dart';
 import 'image_data.dart';
 import 'support/http_clients.dart';
 
@@ -41,93 +41,6 @@ class _CorruptPayloadAdapter extends TypeAdapter<_CorruptPayload> {
   @override
   void write(BinaryWriter writer, _CorruptPayload obj) =>
       writer.writeString(obj.data);
-}
-
-/// Deletes the cached file out from under the first cache-sourced [FileInfo]
-/// it forwards, reproducing an eviction sweep that lands between the cache
-/// manager yielding the file and the consumer reading it.
-class _EvictBeforeReadManager extends CacheManager with ImageCacheManager {
-  _EvictBeforeReadManager(this._inner);
-
-  final DefaultCacheManager _inner;
-
-  int evictions = 0;
-
-  @override
-  Stream<FileResponse> getImageFile(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-    bool withProgress = false,
-    int? maxHeight,
-    int? maxWidth,
-  }) async* {
-    final stream = _inner.getImageFile(
-      url,
-      key: key,
-      headers: headers,
-      withProgress: withProgress,
-      maxHeight: maxHeight,
-      maxWidth: maxWidth,
-    );
-    await for (final response in stream) {
-      if (response is FileInfo &&
-          response.source == FileSource.Cache &&
-          evictions == 0) {
-        evictions++;
-        io.File(response.file.path).deleteSync();
-      }
-      yield response;
-    }
-  }
-
-  @override
-  Stream<FileResponse> getFileStream(
-    String url, {
-    String? key,
-    Map<String, String>? headers,
-    bool withProgress = false,
-  }) =>
-      _inner.getFileStream(
-        url,
-        key: key,
-        headers: headers,
-        withProgress: withProgress,
-      );
-
-  @override
-  Future<FileInfo?> getFileFromCache(
-    String key, {
-    bool ignoreMemCache = false,
-  }) =>
-      _inner.getFileFromCache(key, ignoreMemCache: ignoreMemCache);
-
-  @override
-  Future<File> putFile(
-    String url,
-    List<int> fileBytes, {
-    String? key,
-    String? eTag,
-    Duration maxAge = const Duration(days: 30),
-    String fileExtension = 'file',
-  }) =>
-      _inner.putFile(
-        url,
-        fileBytes,
-        key: key,
-        eTag: eTag,
-        maxAge: maxAge,
-        fileExtension: fileExtension,
-      );
-
-  @override
-  Future<void> removeFile(String key) => _inner.removeFile(key);
-
-  @override
-  Future<void> emptyCache() => _inner.emptyCache();
-
-  @override
-  Future<void> dispose() => _inner.dispose();
 }
 
 void main() {
@@ -1755,7 +1668,7 @@ void main() {
       // Reproduce the production interleaving: the eviction sweep deletes the
       // file after getFileFromCache has handed out the FileInfo but before the
       // image loader reads it.
-      final evicting = _EvictBeforeReadManager(inner);
+      final evicting = EvictBeforeReadManager(inner);
 
       final chunkEvents = StreamController<ImageChunkEvent>()
         ..stream.listen((_) {});
@@ -1797,7 +1710,7 @@ void main() {
       await inner.getFileStream(url).toList();
       expect(requests, 1);
 
-      final evicting = _EvictBeforeReadManager(inner);
+      final evicting = EvictBeforeReadManager(inner);
 
       final chunkEvents = StreamController<ImageChunkEvent>()
         ..stream.listen((_) {});
@@ -1842,7 +1755,7 @@ void main() {
       await inner.putFile(url, kTransparentImage,
           maxAge: Duration.zero, fileExtension: 'png');
 
-      final evicting = _EvictBeforeReadManager(inner);
+      final evicting = EvictBeforeReadManager(inner);
 
       final chunkEvents = StreamController<ImageChunkEvent>()
         ..stream.listen((_) {});

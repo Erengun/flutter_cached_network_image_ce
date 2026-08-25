@@ -3,9 +3,11 @@
 // found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:io' as io;
 import 'dart:typed_data';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:file/file.dart' show File;
 import 'package:file/memory.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -189,4 +191,91 @@ class ExpectedData {
     required this.totalSize,
     required this.chunkSize,
   });
+}
+
+/// Deletes the cached file out from under the first cache-sourced [FileInfo]
+/// it forwards, reproducing an eviction sweep that lands between the cache
+/// manager yielding the file and the consumer reading it.
+class EvictBeforeReadManager extends CacheManager with ImageCacheManager {
+  EvictBeforeReadManager(this._inner);
+
+  final ImageCacheManager _inner;
+
+  int evictions = 0;
+
+  @override
+  Stream<FileResponse> getImageFile(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+    int? maxHeight,
+    int? maxWidth,
+  }) async* {
+    final stream = _inner.getImageFile(
+      url,
+      key: key,
+      headers: headers,
+      withProgress: withProgress,
+      maxHeight: maxHeight,
+      maxWidth: maxWidth,
+    );
+    await for (final response in stream) {
+      if (response is FileInfo &&
+          response.source == FileSource.Cache &&
+          evictions == 0) {
+        evictions++;
+        io.File(response.file.path).deleteSync();
+      }
+      yield response;
+    }
+  }
+
+  @override
+  Stream<FileResponse> getFileStream(
+    String url, {
+    String? key,
+    Map<String, String>? headers,
+    bool withProgress = false,
+  }) =>
+      _inner.getFileStream(
+        url,
+        key: key,
+        headers: headers,
+        withProgress: withProgress,
+      );
+
+  @override
+  Future<FileInfo?> getFileFromCache(
+    String key, {
+    bool ignoreMemCache = false,
+  }) =>
+      _inner.getFileFromCache(key, ignoreMemCache: ignoreMemCache);
+
+  @override
+  Future<File> putFile(
+    String url,
+    List<int> fileBytes, {
+    String? key,
+    String? eTag,
+    Duration maxAge = const Duration(days: 30),
+    String fileExtension = 'file',
+  }) =>
+      _inner.putFile(
+        url,
+        fileBytes,
+        key: key,
+        eTag: eTag,
+        maxAge: maxAge,
+        fileExtension: fileExtension,
+      );
+
+  @override
+  Future<void> removeFile(String key) => _inner.removeFile(key);
+
+  @override
+  Future<void> emptyCache() => _inner.emptyCache();
+
+  @override
+  Future<void> dispose() => _inner.dispose();
 }

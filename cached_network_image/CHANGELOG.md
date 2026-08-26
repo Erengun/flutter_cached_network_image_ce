@@ -1,3 +1,12 @@
+## [4.10.1] - 2026-08-26
+
+* **Fix:** `PathNotFoundException` when the background cleanup sweep deleted a cached file after `getFileFromCache` had already handed out its `FileInfo` but before the image was read. The sweep starts unawaited during initialization, so on cold start every first-frame load raced it. A cached file that disappears mid-read now falls back to a fresh download instead of throwing. Applies to the resize path too, which reads the separately-evictable original entry.
+* **Fix:** `getImageFile` removed its in-flight resize entry only after its stream completed, so abandoning that stream left every later call for the same key waiting on a stream that had already finished, and no image was ever delivered.
+* **Fix:** `putFile` now awaits its Hive metadata write instead of returning while the write is still unsequenced.
+* **Behaviour change:** The cleanup sweep skips entries served within the last 30 seconds, so an image still being loaded is not evicted out from under its reader. Skipped entries lose their place in the eviction order but not the size budget, so `maxNrOfCacheObjects` is still honoured.
+
+reported by [@aycasecr](https://github.com/aycasecr) — thanks! (PR #62)
+
 ## [4.10.0] - 2026-07-30
 
 * **Performance:** `DefaultCacheManager` now reuses a single HTTP client across downloads instead of creating and closing one per request, so connections can be kept alive between images.

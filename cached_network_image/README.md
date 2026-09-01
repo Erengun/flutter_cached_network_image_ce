@@ -254,6 +254,37 @@ When `onStore` rejects, the downloaded file is copied to a system-temp location,
 cache-directory copy is deleted (no orphan), and the temp copy is yielded to the caller for
 this request only.
 
+### Pre-caching Images
+
+Download and cache images before they appear on screen, so navigation
+feels instant. `preCache` reuses the same cache manager and key logic as
+the widget.
+
+```dart
+// Warm the cache ahead of time (e.g. in initState or a splash screen).
+await CachedNetworkImage.preCache(
+  imageUrl: 'https://example.com/hero.jpg',
+);
+
+// Later, the widget loads from cache with no network wait.
+CachedNetworkImage(imageUrl: 'https://example.com/hero.jpg')
+```
+
+All parameters are optional except `imageUrl`:
+
+```dart
+await CachedNetworkImage.preCache(
+  imageUrl: 'https://example.com/hero.jpg',
+  cacheKey: 'hero',
+  headers: {'Authorization': 'Bearer token'},
+  cacheManager: myCustomCacheManager,
+  maxWidthDiskCache: 800,
+  maxHeightDiskCache: 600,
+);
+```
+
+Returns a `FileInfo` with the cached file path, expiry, and source.
+
 ### Unsupported Image Formats (SVG, JXL, AVIF, HEIC, ...)
 
 Flutter's built-in image codec can't decode every format. SVG never works

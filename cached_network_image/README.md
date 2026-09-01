@@ -111,6 +111,47 @@ CachedNetworkImage(
 ),
 ```
 
+### Global Default Builders
+
+Set the builders once instead of repeating them at every call site. The statics
+are used by every `CachedNetworkImage` that does not pass its own value:
+
+```dart
+void main() {
+  CachedNetworkImage.defaultPlaceholder = (context, url) => const Center(
+        child: CircularProgressIndicator(),
+      );
+  CachedNetworkImage.defaultErrorBuilder = (context, error, stackTrace) =>
+      const Icon(Icons.broken_image);
+
+  CachedNetworkImage.defaultPlaceholderFadeInDuration =
+      const Duration(milliseconds: 300);
+
+  runApp(const MyApp());
+}
+
+// Uses the globals above.
+CachedNetworkImage(imageUrl: url);
+
+// A value passed to the widget always wins over the global one.
+CachedNetworkImage(
+  imageUrl: url,
+  errorBuilder: (context, error, stackTrace) => const Text('failed'),
+);
+```
+
+Available statics:
+
+| Static | Overrides |
+| --- | --- |
+| `CachedNetworkImage.defaultImageBuilder` | `imageBuilder` |
+| `CachedNetworkImage.defaultPlaceholder` | `placeholder` |
+| `CachedNetworkImage.defaultProgressIndicatorBuilder` | `progressIndicatorBuilder` |
+| `CachedNetworkImage.defaultErrorBuilder` | `errorBuilder` |
+| `CachedNetworkImage.defaultUnsupportedImageBuilder` | `unsupportedImageBuilder` |
+| `CachedNetworkImage.defaultPlaceholderFadeInDuration` | `placeholderFadeInDuration` |
+| `CachedNetworkImage.defaultErrorListener` | `errorListener` |
+
 ### Direct ImageProvider Usage
 
 ```dart

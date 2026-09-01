@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:octo_image/octo_image.dart';
@@ -355,15 +356,27 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
     final imageConfigChanged = oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.cacheKey != widget.cacheKey ||
         oldWidget.cacheManager != widget.cacheManager ||
-        oldWidget.httpHeaders != widget.httpHeaders ||
+        // `Map` has no value equality, so `!=` here compared identity: a
+        // caller passing `httpHeaders: {...}` as an inline literal (there is
+        // no way to keep that reference stable across rebuilds either) hit
+        // the exact same flicker bug as `errorListener` below (#32), just
+        // through a different field.
+        !mapEquals(oldWidget.httpHeaders, widget.httpHeaders) ||
         oldWidget.maxWidthDiskCache != widget.maxWidthDiskCache ||
         oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
         oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||
         oldWidget.scale != widget.scale ||
-        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration ||
-        oldWidget.errorListener != widget.errorListener;
+        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration;
 
-    if (imageConfigChanged) {
+    // `errorListener` is a callback, and most callers pass a new closure on
+    // every build (it can't reasonably be expected to stay identical across
+    // rebuilds). It must not feed into `imageConfigChanged`: doing so made
+    // every unrelated parent rebuild look like the image target changed,
+    // which reset the cache-hit optimistic state below and made the
+    // placeholder/fade flicker on every rebuild while the image was still
+    // loading (see #32). We still refresh the provider so it carries the
+    // latest listener, just without treating it as a "real" config change.
+    if (imageConfigChanged || oldWidget.errorListener != widget.errorListener) {
       _createImageProvider();
     }
 

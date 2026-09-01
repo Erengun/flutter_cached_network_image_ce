@@ -79,8 +79,7 @@ class CachedNetworkImage extends StatefulWidget {
     int? maxWidthDiskCache,
     int? maxHeightDiskCache,
   }) async {
-    final cm =
-        cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
+    final cm = cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
 
     assert(
       cm is ImageCacheManager ||

@@ -309,7 +309,7 @@ class _PreCacheContentState extends State<PreCacheContent> {
     setState(() => _loading = true);
     try {
       await CachedNetworkImage.preCache(imageUrl: _imageUrl);
-      setState(() => _cached = true);
+      if (mounted) setState(() => _cached = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

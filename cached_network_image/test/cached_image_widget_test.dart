@@ -421,6 +421,81 @@ void main() {
     });
 
     testWidgets(
+        'does not re-run the disk-cache pre-check on an unrelated rebuild '
+        'that only passes a new errorListener closure (#32)', (tester) async {
+      // Image is NOT yet in the disk cache (still "loading"), which is the
+      // scenario from the reported issue: every parent rebuild while the
+      // image is loading re-triggered the cache pre-check and, in doing so,
+      // hid the placeholder for a frame each time, causing a visible
+      // flicker.
+      var imageUrl = 'unrelated-rebuild-not-cached-test';
+      var cacheCheckCount = 0;
+      when(
+        () => cacheManager.getFileFromCache(
+          imageUrl,
+          ignoreMemCache: any(named: 'ignoreMemCache'),
+        ),
+      ).thenAnswer((_) async {
+        cacheCheckCount++;
+        return null;
+      });
+      cacheManager.returns(imageUrl, kTransparentImage);
+      var rebuildCount = 0;
+
+      await tester.pumpWidget(
+        StatefulBuilder(
+          builder: (context, setState) {
+            return MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: imageUrl,
+                      cacheManager: cacheManager,
+                      // A fresh closure every build, like most real callers
+                      // pass (e.g. `errorListener: (e) { ... }` written
+                      // inline). This must not be mistaken for the image
+                      // target changing.
+                      errorListener: (error) {},
+                      // Deliberately not an indeterminate spinner: that would
+                      // keep an animation ticking forever once shown, which
+                      // would make pump/pumpAndSettle calls below hang for
+                      // reasons unrelated to what this test is checking.
+                      placeholder: (context, url) => const Text('loading'),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() => rebuildCount++),
+                      child: const Text('Unrelated setState'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+      // Let the initial disk-cache pre-check resolve.
+      await tester.pump();
+      await tester.pump();
+      expect(cacheCheckCount, 1,
+          reason: 'Exactly one pre-check should run for the initial build');
+
+      // Simulate a parent doing repeated, unrelated setState calls (e.g. a
+      // streaming chat UI) while this image is still loading. Each rebuild
+      // passes a brand new `errorListener` closure, as above. None of these
+      // should trigger another disk-cache pre-check, since nothing about
+      // the image target actually changed.
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(find.text('Unrelated setState'));
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(cacheCheckCount, 1,
+          reason: 'Unrelated rebuilds must not re-trigger the disk-cache '
+              'pre-check (and the placeholder flicker that comes with it)');
+    });
+
+    testWidgets(
         'always shows placeholder when disablePlaceholderOnCacheHit is false',
         (tester) async {
       var imageUrl = 'always-placeholder-test';

@@ -360,10 +360,17 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
         oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
         oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||
         oldWidget.scale != widget.scale ||
-        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration ||
-        oldWidget.errorListener != widget.errorListener;
+        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration;
 
-    if (imageConfigChanged) {
+    // `errorListener` is a callback, and most callers pass a new closure on
+    // every build (it can't reasonably be expected to stay identical across
+    // rebuilds). It must not feed into `imageConfigChanged`: doing so made
+    // every unrelated parent rebuild look like the image target changed,
+    // which reset the cache-hit optimistic state below and made the
+    // placeholder/fade flicker on every rebuild while the image was still
+    // loading (see #32). We still refresh the provider so it carries the
+    // latest listener, just without treating it as a "real" config change.
+    if (imageConfigChanged || oldWidget.errorListener != widget.errorListener) {
       _createImageProvider();
     }
 

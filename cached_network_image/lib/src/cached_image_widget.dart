@@ -65,6 +65,61 @@ class CachedNetworkImage extends StatefulWidget {
   static set logLevel(CacheManagerLogLevel level) =>
       CacheManager.logLevel = level;
 
+  /// Downloads and caches an image without rendering it.
+  ///
+  /// Use this to warm the cache before the image is needed on screen.
+  /// When [maxWidthDiskCache] or [maxHeightDiskCache] are provided and the
+  /// [cacheManager] supports [ImageCacheManager], the resized variant is
+  /// cached.
+  static Future<FileInfo> preCache({
+    required String imageUrl,
+    String? cacheKey,
+    Map<String, String>? headers,
+    BaseCacheManager? cacheManager,
+    int? maxWidthDiskCache,
+    int? maxHeightDiskCache,
+  }) async {
+    final cm = cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
+
+    assert(
+      cm is ImageCacheManager ||
+          (maxWidthDiskCache == null && maxHeightDiskCache == null),
+      'To resize the image the CacheManager needs to be an '
+      'ImageCacheManager. maxWidthDiskCache and maxHeightDiskCache will '
+      'be ignored when a normal CacheManager is used.',
+    );
+
+    final Stream<FileResponse> stream;
+    if (cm is ImageCacheManager &&
+        (maxWidthDiskCache != null || maxHeightDiskCache != null)) {
+      stream = cm.getImageFile(
+        imageUrl,
+        key: cacheKey,
+        headers: headers,
+        maxWidth: maxWidthDiskCache,
+        maxHeight: maxHeightDiskCache,
+      );
+    } else {
+      stream = cm.getFileStream(
+        imageUrl,
+        key: cacheKey,
+        headers: headers,
+      );
+    }
+
+    // Drain the entire stream and return the last FileInfo. This ensures
+    // that when the cache manager yields a stale entry followed by a
+    // refreshed one, we wait for the refresh to complete.
+    FileInfo? result;
+    await for (final response in stream) {
+      if (response is FileInfo) result = response;
+    }
+    if (result == null) {
+      throw StateError('Cache manager completed without providing a file');
+    }
+    return result;
+  }
+
   /// Evict an image from both the disk file based caching system of the
   /// [BaseCacheManager] as the in memory [ImageCache] of the [ImageProvider].
   /// [url] is used by both the disk and memory cache. The scale is only used

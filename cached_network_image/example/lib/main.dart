@@ -34,16 +34,18 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('CachedNetworkImage CE'),
           bottom: const TabBar(
+            isScrollable: true,
             tabs: [
               Tab(icon: Icon(Icons.image), text: 'Basic'),
               Tab(icon: Icon(Icons.list), text: 'List'),
               Tab(icon: Icon(Icons.grid_on), text: 'Grid'),
               Tab(icon: Icon(Icons.speed), text: 'Benchmark'),
+              Tab(icon: Icon(Icons.download_done), text: 'PreCache'),
             ],
           ),
         ),
@@ -53,6 +55,7 @@ class HomePage extends StatelessWidget {
             ListContent(),
             GridContent(),
             BenchmarkContent(),
+            PreCacheContent(),
           ],
         ),
       ),
@@ -286,5 +289,69 @@ class GridContent extends StatelessWidget {
 
   Widget _error(BuildContext context, Object error, StackTrace? stackTrace) {
     return const Center(child: Icon(Icons.error));
+  }
+}
+
+class PreCacheContent extends StatefulWidget {
+  const PreCacheContent({super.key});
+
+  @override
+  State<PreCacheContent> createState() => _PreCacheContentState();
+}
+
+class _PreCacheContentState extends State<PreCacheContent> {
+  static const _imageUrl =
+      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800';
+  bool _loading = false;
+  bool _cached = false;
+
+  Future<void> _preCache() async {
+    setState(() => _loading = true);
+    try {
+      await CachedNetworkImage.preCache(imageUrl: _imageUrl);
+      if (mounted) setState(() => _cached = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PreCache failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (!_cached)
+            ElevatedButton.icon(
+              onPressed: _loading ? null : _preCache,
+              icon: _loading
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.download),
+              label: Text(_loading ? 'Pre-caching...' : 'Pre-cache image'),
+            ),
+          if (_cached) ...[
+            const Text('Image cached! Displaying from cache:'),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 300,
+              child: CachedNetworkImage(
+                imageUrl: _imageUrl,
+                placeholder: (context, url) =>
+                    const CircularProgressIndicator(),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }

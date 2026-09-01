@@ -143,6 +143,7 @@ Shipping something with it? [Open a PR](https://github.com/Erengun/flutter_cache
 - **Real web support** — persistent IndexedDB caching, not just browser HTTP cache.
 - **HTTP & cache interceptors** — inject auth headers, logging, or synthetic responses without forking anything.
 - **Pluggable eviction** — TTL (default) or LRU cleanup strategies.
+- **Pre-caching API** — `CachedNetworkImage.preCache()` downloads and caches images before they hit the screen, for instant navigation.
 - **Graceful unsupported-format handling** — SVG/AVIF/HEIC decode failures route to `unsupportedImageBuilder` instead of a bare exception.
 - **Actively maintained** — regular releases, community-driven roadmap.
 

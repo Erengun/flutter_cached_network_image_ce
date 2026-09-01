@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:octo_image/octo_image.dart';
@@ -355,7 +356,12 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
     final imageConfigChanged = oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.cacheKey != widget.cacheKey ||
         oldWidget.cacheManager != widget.cacheManager ||
-        oldWidget.httpHeaders != widget.httpHeaders ||
+        // `Map` has no value equality, so `!=` here compared identity: a
+        // caller passing `httpHeaders: {...}` as an inline literal (there is
+        // no way to keep that reference stable across rebuilds either) hit
+        // the exact same flicker bug as `errorListener` below (#32), just
+        // through a different field.
+        !mapEquals(oldWidget.httpHeaders, widget.httpHeaders) ||
         oldWidget.maxWidthDiskCache != widget.maxWidthDiskCache ||
         oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
         oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||

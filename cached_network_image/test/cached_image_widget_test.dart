@@ -496,6 +496,75 @@ void main() {
     });
 
     testWidgets(
+        'does not re-run the disk-cache pre-check on an unrelated rebuild '
+        'that only passes a content-equal but new httpHeaders map (#68)',
+        (tester) async {
+      // Same class of bug as the errorListener case above, entered through
+      // `httpHeaders` instead: `Map` has no value equality, so comparing it
+      // with `!=` treats a fresh-but-equal map literal (the normal way to
+      // pass headers inline) as a real config change on every rebuild.
+      var imageUrl = 'unrelated-rebuild-headers-test';
+      var cacheCheckCount = 0;
+      when(
+        () => cacheManager.getFileFromCache(
+          imageUrl,
+          ignoreMemCache: any(named: 'ignoreMemCache'),
+        ),
+      ).thenAnswer((_) async {
+        cacheCheckCount++;
+        return null;
+      });
+      cacheManager.returns(imageUrl, kTransparentImage);
+      var rebuildCount = 0;
+
+      await tester.pumpWidget(
+        StatefulBuilder(
+          builder: (context, setState) {
+            return MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: imageUrl,
+                      cacheManager: cacheManager,
+                      // A fresh (but content-equal) map literal every build,
+                      // like most real callers pass (e.g.
+                      // `httpHeaders: {'Authorization': token}` written
+                      // inline). This must not be mistaken for the image
+                      // target changing. Deliberately not `const`: a const
+                      // map would be canonicalized to the same instance on
+                      // every build, which wouldn't exercise this bug.
+                      // ignore: prefer_const_literals_to_create_immutables
+                      httpHeaders: {'Authorization': 'token'},
+                      placeholder: (context, url) => const Text('loading'),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() => rebuildCount++),
+                      child: const Text('Unrelated setState'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(cacheCheckCount, 1,
+          reason: 'Exactly one pre-check should run for the initial build');
+
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(find.text('Unrelated setState'));
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(cacheCheckCount, 1,
+          reason: 'Unrelated rebuilds must not re-trigger the disk-cache '
+              'pre-check (and the placeholder flicker that comes with it)');
+    });
+
+    testWidgets(
         'always shows placeholder when disablePlaceholderOnCacheHit is false',
         (tester) async {
       var imageUrl = 'always-placeholder-test';

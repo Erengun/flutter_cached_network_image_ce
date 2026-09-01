@@ -143,6 +143,7 @@ Shipping something with it? [Open a PR](https://github.com/Erengun/flutter_cache
 - **Real web support** — persistent IndexedDB caching, not just browser HTTP cache.
 - **HTTP & cache interceptors** — inject auth headers, logging, or synthetic responses without forking anything.
 - **Pluggable eviction** — TTL (default) or LRU cleanup strategies.
+- **Global default builders** — set the placeholder, error and progress builders once for the whole app.
 - **Graceful unsupported-format handling** — SVG/AVIF/HEIC decode failures route to `unsupportedImageBuilder` instead of a bare exception.
 - **Actively maintained** — regular releases, community-driven roadmap.
 
@@ -164,7 +165,7 @@ CachedNetworkImage(
 
 ## Full docs and advanced usage
 
-The quick start above covers the basics. For interceptors, cleanup strategies, connection timeouts, custom cache and metadata directories, web render modes, and unsupported-format handling, see the full reference:
+The quick start above covers the basics. For interceptors, cleanup strategies, connection timeouts, custom cache and metadata directories, web render modes, global default builders, and unsupported-format handling, see the full reference:
 
 [`cached_network_image/README.md`](cached_network_image/README.md)
 

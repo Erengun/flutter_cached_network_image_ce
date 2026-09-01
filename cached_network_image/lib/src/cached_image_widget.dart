@@ -65,6 +65,48 @@ class CachedNetworkImage extends StatefulWidget {
   static set logLevel(CacheManagerLogLevel level) =>
       CacheManager.logLevel = level;
 
+  /// App-wide fallback for [imageBuilder].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [imageBuilder].
+  static ImageWidgetBuilder? defaultImageBuilder;
+
+  /// App-wide fallback for [placeholder].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [placeholder].
+  static PlaceholderWidgetBuilder? defaultPlaceholder;
+
+  /// App-wide fallback for [progressIndicatorBuilder].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [progressIndicatorBuilder].
+  static ProgressIndicatorBuilder? defaultProgressIndicatorBuilder;
+
+  /// App-wide fallback for [errorBuilder].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [errorBuilder].
+  static ImageErrorWidgetBuilder? defaultErrorBuilder;
+
+  /// App-wide fallback for [unsupportedImageBuilder].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [unsupportedImageBuilder].
+  static UnsupportedImageWidgetBuilder? defaultUnsupportedImageBuilder;
+
+  /// App-wide fallback for [placeholderFadeInDuration].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [placeholderFadeInDuration].
+  static Duration? defaultPlaceholderFadeInDuration;
+
+  /// App-wide fallback for [errorListener].
+  ///
+  /// Used by every [CachedNetworkImage] that does not pass its own
+  /// [errorListener].
+  static ValueChanged<Object>? defaultErrorListener;
+
   /// Evict an image from both the disk file based caching system of the
   /// [BaseCacheManager] as the in memory [ImageCache] of the [ImageProvider].
   /// [url] is used by both the disk and memory cache. The scale is only used
@@ -319,6 +361,37 @@ class CachedNetworkImage extends StatefulWidget {
     this.disablePlaceholderOnCacheHit = true,
   });
 
+  /// [imageBuilder] of this widget, or [defaultImageBuilder] if not given.
+  ImageWidgetBuilder? get effectiveImageBuilder =>
+      imageBuilder ?? defaultImageBuilder;
+
+  /// [placeholder] of this widget, or [defaultPlaceholder] if not given.
+  PlaceholderWidgetBuilder? get effectivePlaceholder =>
+      placeholder ?? defaultPlaceholder;
+
+  /// [progressIndicatorBuilder] of this widget, or
+  /// [defaultProgressIndicatorBuilder] if not given.
+  ProgressIndicatorBuilder? get effectiveProgressIndicatorBuilder =>
+      progressIndicatorBuilder ?? defaultProgressIndicatorBuilder;
+
+  /// [errorBuilder] of this widget, or [defaultErrorBuilder] if not given.
+  ImageErrorWidgetBuilder? get effectiveErrorBuilder =>
+      errorBuilder ?? defaultErrorBuilder;
+
+  /// [unsupportedImageBuilder] of this widget, or
+  /// [defaultUnsupportedImageBuilder] if not given.
+  UnsupportedImageWidgetBuilder? get effectiveUnsupportedImageBuilder =>
+      unsupportedImageBuilder ?? defaultUnsupportedImageBuilder;
+
+  /// [placeholderFadeInDuration] of this widget, or
+  /// [defaultPlaceholderFadeInDuration] if not given.
+  Duration? get effectivePlaceholderFadeInDuration =>
+      placeholderFadeInDuration ?? defaultPlaceholderFadeInDuration;
+
+  /// [errorListener] of this widget, or [defaultErrorListener] if not given.
+  ValueChanged<Object>? get effectiveErrorListener =>
+      errorListener ?? defaultErrorListener;
+
   @override
   State<CachedNetworkImage> createState() => _CachedNetworkImageState();
 }
@@ -388,7 +461,7 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
       imageRenderMethodForWeb: widget.imageRenderMethodForWeb,
       maxWidth: widget.maxWidthDiskCache,
       maxHeight: widget.maxHeightDiskCache,
-      errorListener: widget.errorListener,
+      errorListener: widget.effectiveErrorListener,
       scale: widget.scale,
       minimumGifFrameDuration: widget.minimumGifFrameDuration,
     );
@@ -416,19 +489,19 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    final hasCustomBuilder = widget.imageBuilder != null ||
-        widget.placeholder != null ||
-        widget.progressIndicatorBuilder != null ||
+    final hasCustomBuilder = widget.effectiveImageBuilder != null ||
+        widget.effectivePlaceholder != null ||
+        widget.effectiveProgressIndicatorBuilder != null ||
         widget.errorWidget != null ||
-        widget.errorBuilder != null ||
-        widget.unsupportedImageBuilder != null;
+        widget.effectiveErrorBuilder != null ||
+        widget.effectiveUnsupportedImageBuilder != null;
 
     OctoPlaceholderBuilder? octoPlaceholderBuilder;
     OctoProgressIndicatorBuilder? octoProgressIndicatorBuilder;
     Duration? effectiveFadeOutDuration = widget.fadeOutDuration;
     Duration effectiveFadeInDuration = widget.fadeInDuration;
     Duration? effectivePlaceholderFadeInDuration =
-        widget.placeholderFadeInDuration;
+        widget.effectivePlaceholderFadeInDuration;
 
     if (_skipPlaceholder) {
       // Image is in disk cache — skip placeholder and fade animations
@@ -440,10 +513,11 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
       effectivePlaceholderFadeInDuration = Duration.zero;
     } else {
       octoPlaceholderBuilder =
-          widget.placeholder != null ? _octoPlaceholderBuilder : null;
-      octoProgressIndicatorBuilder = widget.progressIndicatorBuilder != null
-          ? _octoProgressIndicatorBuilder
-          : null;
+          widget.effectivePlaceholder != null ? _octoPlaceholderBuilder : null;
+      octoProgressIndicatorBuilder =
+          widget.effectiveProgressIndicatorBuilder != null
+              ? _octoProgressIndicatorBuilder
+              : null;
 
       /// If there is no placeholder OctoImage does not fade, so always set an
       /// (empty) placeholder as this always used to be the behaviour of
@@ -456,7 +530,8 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
 
     return OctoImage(
       image: _image,
-      imageBuilder: widget.imageBuilder != null ? _octoImageBuilder : null,
+      imageBuilder:
+          widget.effectiveImageBuilder != null ? _octoImageBuilder : null,
       placeholderBuilder: octoPlaceholderBuilder,
       progressIndicatorBuilder: octoProgressIndicatorBuilder,
       errorBuilder: hasCustomBuilder ? _octoErrorBuilder : null,
@@ -481,11 +556,11 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
   }
 
   Widget _octoImageBuilder(BuildContext context, Widget child) {
-    return widget.imageBuilder!(context, _image);
+    return widget.effectiveImageBuilder!(context, _image);
   }
 
   Widget _octoPlaceholderBuilder(BuildContext context) {
-    return widget.placeholder!(context, widget.imageUrl);
+    return widget.effectivePlaceholder!(context, widget.imageUrl);
   }
 
   Widget _octoProgressIndicatorBuilder(
@@ -498,7 +573,7 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
       totalSize = progress.expectedTotalBytes;
       downloaded = progress.cumulativeBytesLoaded;
     }
-    return widget.progressIndicatorBuilder!(
+    return widget.effectiveProgressIndicatorBuilder!(
       context,
       widget.imageUrl,
       DownloadProgress(widget.imageUrl, totalSize, downloaded),
@@ -511,12 +586,12 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
     StackTrace? stackTrace,
   ) {
     if (error is UnsupportedImageFormatException &&
-        widget.unsupportedImageBuilder != null) {
-      return widget.unsupportedImageBuilder!(
+        widget.effectiveUnsupportedImageBuilder != null) {
+      return widget.effectiveUnsupportedImageBuilder!(
           context, widget.imageUrl, error.bytes);
     }
-    if (widget.errorBuilder != null) {
-      return widget.errorBuilder!(context, error, stackTrace);
+    if (widget.effectiveErrorBuilder != null) {
+      return widget.effectiveErrorBuilder!(context, error, stackTrace);
     }
     if (widget.errorWidget != null) {
       return widget.errorWidget!(context, widget.imageUrl, error);

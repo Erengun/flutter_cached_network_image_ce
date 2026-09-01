@@ -1,3 +1,7 @@
+## (unreleased)
+
+* **Feature:** Added app-wide static defaults on `CachedNetworkImage`, so the builders can be set once instead of at every call site: `defaultImageBuilder`, `defaultPlaceholder`, `defaultProgressIndicatorBuilder`, `defaultErrorBuilder`, `defaultUnsupportedImageBuilder`, `defaultPlaceholderFadeInDuration` and `defaultErrorListener`. A value passed to the widget always wins over the static one; resolution is exposed through the new `effectiveX` getters.
+
 ## [4.10.1] - 2026-08-26
 
 * **Fix:** `PathNotFoundException` when the background cleanup sweep deleted a cached file after `getFileFromCache` had already handed out its `FileInfo` but before the image was read. The sweep starts unawaited during initialization, so on cold start every first-frame load raced it. A cached file that disappears mid-read now falls back to a fresh download instead of throwing. Applies to the resize path too, which reads the separately-evictable original entry.

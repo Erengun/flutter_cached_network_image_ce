@@ -59,11 +59,13 @@ class MockCodec implements Codec {
     _nextFrameCompleter.completeError(err);
   }
 
-  bool disposed = false;
+  int numDisposals = 0;
+
+  bool get disposed => numDisposals > 0;
 
   @override
   void dispose() {
-    disposed = true;
+    numDisposals += 1;
   }
 }
 
@@ -433,6 +435,121 @@ void main() {
     await tester.idle();
     await tester.pump();
     expect(emittedImages, hasLength(1));
+
+    imageStream.removeListener(streamListener);
+    handle.dispose();
+  });
+
+  testWidgets(
+      'A superseded codec finishing does not unblock a decode on the current '
+      'codec', (WidgetTester tester) async {
+    final codecStream = StreamController<Codec>();
+    final firstCodec = MockCodec();
+    firstCodec.frameCount = 3;
+    final secondCodec = MockCodec();
+    secondCodec.frameCount = 3;
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+
+    listener(ImageInfo image, bool synchronousCall) {}
+    final streamListener = ImageStreamListener(listener);
+    final handle = imageStream.keepAlive();
+    imageStream.addListener(streamListener);
+
+    codecStream.add(firstCodec);
+    await tester.idle();
+    expect(firstCodec.numFramesAsked, 1);
+
+    codecStream.add(secondCodec);
+    await tester.idle();
+    expect(secondCodec.numFramesAsked, 1);
+
+    // The superseded codec finishes first. Its decode is not the current
+    // codec's, so it must not make the current codec look idle.
+    firstCodec.completeNextFrame(
+      FakeFrameInfo(const Duration(milliseconds: 200), image20x10),
+    );
+    await tester.idle();
+
+    imageStream.removeListener(streamListener);
+    imageStream.addListener(streamListener);
+    await tester.idle();
+    expect(secondCodec.numFramesAsked, 1);
+
+    imageStream.removeListener(streamListener);
+    handle.dispose();
+  });
+
+  testWidgets('A replaced codec is disposed exactly once',
+      (WidgetTester tester) async {
+    final codecStream = StreamController<Codec>();
+    final firstCodec = MockCodec();
+    firstCodec.frameCount = 1;
+    final secondCodec = MockCodec();
+    secondCodec.frameCount = 1;
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+
+    listener(ImageInfo image, bool synchronousCall) {}
+    final streamListener = ImageStreamListener(listener);
+    final handle = imageStream.keepAlive();
+    imageStream.addListener(streamListener);
+
+    codecStream.add(firstCodec);
+    await tester.idle();
+    expect(firstCodec.numFramesAsked, 1);
+
+    // Replaced while its decode is in flight: disposing it now would fail that
+    // decode, so it is deferred to the decode itself.
+    codecStream.add(secondCodec);
+    await tester.idle();
+    expect(firstCodec.numDisposals, 0);
+
+    firstCodec.completeNextFrame(
+      FakeFrameInfo(const Duration(milliseconds: 200), image20x10),
+    );
+    await tester.idle();
+    expect(firstCodec.numDisposals, 1);
+    expect(secondCodec.numDisposals, 0);
+
+    imageStream.removeListener(streamListener);
+    handle.dispose();
+  });
+
+  testWidgets('An idle codec is disposed when it is replaced',
+      (WidgetTester tester) async {
+    final codecStream = StreamController<Codec>();
+    final firstCodec = MockCodec();
+    firstCodec.frameCount = 1;
+    final secondCodec = MockCodec();
+    secondCodec.frameCount = 1;
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+
+    listener(ImageInfo image, bool synchronousCall) {}
+    final streamListener = ImageStreamListener(listener);
+    final handle = imageStream.keepAlive();
+    imageStream.addListener(streamListener);
+
+    codecStream.add(firstCodec);
+    await tester.idle();
+    firstCodec.completeNextFrame(
+      FakeFrameInfo(const Duration(milliseconds: 200), image20x10),
+    );
+    await tester.idle();
+    await tester.pump();
+    expect(firstCodec.numDisposals, 0);
+
+    codecStream.add(secondCodec);
+    await tester.idle();
+    expect(firstCodec.numDisposals, 1);
+    expect(secondCodec.numDisposals, 0);
 
     imageStream.removeListener(streamListener);
     handle.dispose();

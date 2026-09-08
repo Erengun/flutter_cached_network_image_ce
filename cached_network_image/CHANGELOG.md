@@ -4,8 +4,7 @@
 * **Fix:** The completer handed the codec's own `ui.Image` to `ImageInfo` instead of a clone and never disposed `_nextFrame`, so every decode that was abandoned (listener dropped mid-decode) or superseded leaked a `ui.Image`. Frames are now cloned into `ImageInfo` and the decoded frame is disposed once handed over, matching the framework's `MultiFrameImageStreamCompleter`. That is also the ownership bug behind the black image above: `setImage` disposing the previous `ImageInfo` no longer releases a handle the codec's decoded frame still owns.
 * **Fix:** A frame could be emitted under a codec that had already replaced the one it was decoded from. `_decodeNextFrameAndSchedule` now captures its codec and discards the frame if the codec changed during the await, instead of evaluating `frameCount` against the new codec — which could terminate a running animation and mis-count the new codec's frames.
 * **Fix:** Adding a listener while a decode was already in flight started a second, concurrent decode of the same codec, so two frames could be emitted and dispose each other's image. `addListener` no longer starts a decode while one is pending.
-* **Fix:** A codec buffered while an animation timer was pending is now disposed when a newer codec replaces it, instead of being dropped undisposed.
-* **Known remaining:** A codec replaced on the direct arrival path is still not disposed. Disposing it there is unsafe while a `getNextFrame()` on the outgoing codec may still be pending, which would resolve against a disposed codec and surface as a spurious error to listeners.
+* **Fix:** Replaced codecs are now disposed instead of dropped, so a cache hit followed by a network refresh no longer retains the outgoing decoder for the life of the completer. A codec replaced while one of its frames is still decoding is disposed by that decode when it returns, since disposing it earlier would fail the pending `getNextFrame()`.
 
 ## [4.11.0] - 2026-09-01
 

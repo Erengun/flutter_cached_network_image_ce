@@ -86,11 +86,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   // Used to guard against registering multiple _handleAppFrame callbacks for the same frame.
   bool _frameCallbackScheduled = false;
 
-  // Whether a `getNextFrame()` call is currently awaiting a result. This is
-  // approximate: when a codec is replaced mid-decode two decodes can be
-  // pending and the first one to finish clears the flag. It is only used as an
-  // `addListener` heuristic, never relied on for correctness.
-  bool _decodeInFlight = false;
+  // The codecs with a `getNextFrame()` call currently awaiting a result. A
+  // codec that is replaced mid-decode stays here until its decode returns, so
+  // a superseded codec finishing cannot make the current codec look idle, and
+  // the pending decode is known to be that codec's last user.
+  final _decodingCodecs = <ui.Codec>{};
 
   /// We must avoid disposing a completer if it never had a listener, even
   /// if all [keepAlive] handles get disposed.
@@ -105,8 +105,18 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   }
 
   void _handleCodecReady(ui.Codec codec) {
+    final previousCodec = _codec;
     _codec = codec;
     _framesEmitted = 0;
+
+    if (previousCodec != null &&
+        previousCodec != codec &&
+        !_decodingCodecs.contains(previousCodec)) {
+      // Nothing is decoding from the outgoing codec, so it can be released
+      // here. If a decode is still pending it owns the disposal instead, as
+      // disposing a codec with a frame in flight would fail that decode.
+      previousCodec.dispose();
+    }
 
     if (hasListeners) {
       _decodeNextFrameAndSchedule();
@@ -155,8 +165,8 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     _nextFrame = null;
 
     final codec = _codec!;
-    final ui.FrameInfo frame;
-    _decodeInFlight = true;
+    ui.FrameInfo? frame;
+    _decodingCodecs.add(codec);
     try {
       frame = await codec.getNextFrame();
     } on Object catch (exception, stack) {
@@ -167,15 +177,21 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
         informationCollector: _informationCollector,
         silent: true,
       );
-      return;
     } finally {
-      _decodeInFlight = false;
+      _decodingCodecs.remove(codec);
     }
 
     if (_codec != codec) {
       // A newer codec was installed while this frame was decoding. The frame
-      // belongs to the old codec and must not be emitted under the new one.
-      frame.image.dispose();
+      // belongs to the old codec and must not be emitted under the new one,
+      // and this decode was the outgoing codec's last user, so it performs the
+      // disposal that `_handleCodecReady` deferred.
+      frame?.image.dispose();
+      codec.dispose();
+      return;
+    }
+    if (frame == null) {
+      // The decode failed and was already reported.
       return;
     }
     _nextFrame = frame;
@@ -224,7 +240,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // disposed.
     if (!hasListeners &&
         _codec != null &&
-        !_decodeInFlight &&
+        !_decodingCodecs.contains(_codec) &&
         (_framesEmitted == 0 || _codec!.frameCount > 1)) {
       _decodeNextFrameAndSchedule();
     }

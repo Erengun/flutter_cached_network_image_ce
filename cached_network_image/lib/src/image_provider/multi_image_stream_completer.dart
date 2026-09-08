@@ -126,15 +126,26 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   void _handleAppFrame(Duration timestamp) {
     _frameCallbackScheduled = false;
     if (!hasListeners) return;
+    final nextFrame = _nextFrame;
+    if (nextFrame == null) {
+      // A replacement codec started a new decode after this callback was
+      // scheduled, releasing the frame it was scheduled to emit. The new
+      // decode schedules a callback of its own.
+      return;
+    }
     if (_isFirstFrame() || _hasFrameDurationPassed(timestamp)) {
-      _emitFrame(ImageInfo(image: _nextFrame!.image.clone(), scale: _scale));
+      // Take the frame before `_emitFrame`, which notifies listeners
+      // synchronously: a listener that re-adds itself from that callback can
+      // start a decode, whose prologue would otherwise release the frame still
+      // being read here.
+      _nextFrame = null;
       _shownTimestamp = timestamp;
       _frameDuration = clampGifFrameDuration(
-        _nextFrame!.duration,
+        nextFrame.duration,
         minimumGifFrameDuration: minimumGifFrameDuration,
       );
-      _nextFrame!.image.dispose();
-      _nextFrame = null;
+      _emitFrame(ImageInfo(image: nextFrame.image.clone(), scale: _scale));
+      nextFrame.image.dispose();
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
         _switchToNewCodec();
       } else {
@@ -159,12 +170,17 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   }
 
   Future<void> _decodeNextFrameAndSchedule() async {
+    final codec = _codec!;
+    if (_decodingCodecs.contains(codec)) {
+      // A decode of this codec is already pending. A second concurrent decode
+      // would emit two frames that dispose each other's image.
+      return;
+    }
+
     // This will be null if we gave it away. If not, it's still ours and it
     // must be disposed of.
     _nextFrame?.image.dispose();
     _nextFrame = null;
-
-    final codec = _codec!;
     ui.FrameInfo? frame;
     _decodingCodecs.add(codec);
     try {
@@ -240,7 +256,6 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // disposed.
     if (!hasListeners &&
         _codec != null &&
-        !_decodingCodecs.contains(_codec) &&
         (_framesEmitted == 0 || _codec!.frameCount > 1)) {
       _decodeNextFrameAndSchedule();
     }

@@ -99,6 +99,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
   void _handleCodecReady(ui.Codec codec) {
     _codec = codec;
+    _framesEmitted = 0;
 
     if (hasListeners) {
       _decodeNextFrameAndSchedule();
@@ -184,7 +185,16 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   @override
   void addListener(ImageStreamListener listener) {
     __hadAtLeastOneListener = true;
-    if (!hasListeners && _codec != null) _decodeNextFrameAndSchedule();
+    // Only decode when nothing has been emitted from the current codec yet, or
+    // when the image is animated. Re-decoding an already decoded single-frame
+    // codec renders black on the web, where CanvasKit images lazily reference a
+    // single shared <img> element that is cleared when the previous frame is
+    // disposed.
+    if (!hasListeners &&
+        _codec != null &&
+        (_framesEmitted == 0 || _codec!.frameCount > 1)) {
+      _decodeNextFrameAndSchedule();
+    }
     super.addListener(listener);
   }
 

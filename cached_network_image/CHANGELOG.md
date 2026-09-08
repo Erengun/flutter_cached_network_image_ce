@@ -1,3 +1,7 @@
+## [4.11.1] - 2026-09-08
+
+* **Fix:** Images turned black on web after the widget was scrolled out of view and back. `MultiImageStreamCompleter` re-decoded the codec on every 0→1 listener transition; for a single-frame image on CanvasKit that produces a second lazy `ui.Image` sharing one `<img>` element, and emitting it disposes the previous image, which clears that element's `src`. The already decoded frame is now handed to the returning listener instead, matching the framework's `MultiFrameImageStreamCompleter`. Animated images still resume decoding. Reported by [@tranhuudang](https://github.com/tranhuudang) (issue #67).
+
 ## [4.11.0] - 2026-09-01
 
 * **Feature:** Added `CachedNetworkImage.preCache()` static method for downloading and caching images without rendering them. Useful for warming the cache before navigation. Supports optional `cacheKey`, `headers`, custom `cacheManager`, disk-resize parameters (`maxWidthDiskCache`, `maxHeightDiskCache`), and an optional `timeout`. Throws a `StateError` instead of silently returning a stale file when refreshing an expired cache entry fails, and an `ArgumentError` (not just an `assert`) when resize parameters are used with a `CacheManager` that isn't an `ImageCacheManager`.

@@ -27,6 +27,8 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     codec.listen(
       (event) {
         if (_timer != null) {
+          // A previously buffered codec was never decoded from; drop it.
+          _nextImageCodec?.dispose();
           _nextImageCodec = event;
         } else {
           _handleCodecReady(event);
@@ -84,6 +86,12 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   // Used to guard against registering multiple _handleAppFrame callbacks for the same frame.
   bool _frameCallbackScheduled = false;
 
+  // Whether a `getNextFrame()` call is currently awaiting a result. This is
+  // approximate: when a codec is replaced mid-decode two decodes can be
+  // pending and the first one to finish clears the flag. It is only used as an
+  // `addListener` heuristic, never relied on for correctness.
+  bool _decodeInFlight = false;
+
   /// We must avoid disposing a completer if it never had a listener, even
   /// if all [keepAlive] handles get disposed.
   bool __hadAtLeastOneListener = false;
@@ -109,12 +117,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     _frameCallbackScheduled = false;
     if (!hasListeners) return;
     if (_isFirstFrame() || _hasFrameDurationPassed(timestamp)) {
-      _emitFrame(ImageInfo(image: _nextFrame!.image, scale: _scale));
+      _emitFrame(ImageInfo(image: _nextFrame!.image.clone(), scale: _scale));
       _shownTimestamp = timestamp;
       _frameDuration = clampGifFrameDuration(
         _nextFrame!.duration,
         minimumGifFrameDuration: minimumGifFrameDuration,
       );
+      _nextFrame!.image.dispose();
       _nextFrame = null;
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
         _switchToNewCodec();
@@ -140,8 +149,16 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   }
 
   Future<void> _decodeNextFrameAndSchedule() async {
+    // This will be null if we gave it away. If not, it's still ours and it
+    // must be disposed of.
+    _nextFrame?.image.dispose();
+    _nextFrame = null;
+
+    final codec = _codec!;
+    final ui.FrameInfo frame;
+    _decodeInFlight = true;
     try {
-      _nextFrame = await _codec!.getNextFrame();
+      frame = await codec.getNextFrame();
     } on Object catch (exception, stack) {
       reportError(
         context: ErrorDescription('resolving an image frame'),
@@ -151,8 +168,19 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
         silent: true,
       );
       return;
+    } finally {
+      _decodeInFlight = false;
     }
-    if (_codec!.frameCount == 1) {
+
+    if (_codec != codec) {
+      // A newer codec was installed while this frame was decoding. The frame
+      // belongs to the old codec and must not be emitted under the new one.
+      frame.image.dispose();
+      return;
+    }
+    _nextFrame = frame;
+
+    if (codec.frameCount == 1) {
       // ImageStreamCompleter listeners removed while waiting for next frame to
       // be decoded.
       // There's no reason to emit the frame without active listeners.
@@ -162,7 +190,9 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
       // This is not an animated image, just return it and don't schedule more
       // frames.
-      _emitFrame(ImageInfo(image: _nextFrame!.image, scale: _scale));
+      _emitFrame(ImageInfo(image: _nextFrame!.image.clone(), scale: _scale));
+      _nextFrame!.image.dispose();
+      _nextFrame = null;
       return;
     }
     _scheduleAppFrame();
@@ -194,6 +224,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // disposed.
     if (!hasListeners &&
         _codec != null &&
+        !_decodeInFlight &&
         (_framesEmitted == 0 || _codec!.frameCount > 1)) {
       _decodeNextFrameAndSchedule();
     }

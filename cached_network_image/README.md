@@ -280,10 +280,17 @@ await CachedNetworkImage.preCache(
   cacheManager: myCustomCacheManager,
   maxWidthDiskCache: 800,
   maxHeightDiskCache: 600,
+  timeout: const Duration(seconds: 10),
 );
 ```
 
-Returns a `FileInfo` with the cached file path, expiry, and source.
+Returns a `FileInfo` with the cached file path, expiry, and source. Waits
+for an expired cache entry to finish refreshing before returning, and
+throws a `StateError` instead of returning a stale file if that refresh
+fails. `timeout`, if given, throws a `TimeoutException` when exceeded but
+does not cancel the underlying download. `maxWidthDiskCache` /
+`maxHeightDiskCache` throw an `ArgumentError` when `cacheManager` isn't an
+`ImageCacheManager`.
 
 ### Unsupported Image Formats (SVG, JXL, AVIF, HEIC, ...)
 

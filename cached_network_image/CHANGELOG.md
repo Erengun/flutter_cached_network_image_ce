@@ -1,3 +1,7 @@
+## [4.11.2] - 2026-09-08
+
+* **Refactor:** Tightened the frame-counter invariants in `MultiImageStreamCompleter` after review of the 4.11.1 fix. `_emitFrame` now counts the frame before `setImage`, which notifies listeners synchronously, so a listener that drops and re-adds itself from that callback cannot observe a state claiming nothing has been emitted from the current codec. The duplicate `_framesEmitted` reset in `_switchToNewCodec` was removed; the reset it performed now lives in `_handleCodecReady`, which it calls. No observable behaviour change.
+
 ## [4.11.1] - 2026-09-08
 
 * **Fix:** Images turned black on web after the widget was scrolled out of view and back. `MultiImageStreamCompleter` re-decoded the codec on every 0→1 listener transition; for a single-frame image on CanvasKit that produces a second lazy `ui.Image` sharing one `<img>` element, and emitting it disposes the previous image, which clears that element's `src`. The already decoded frame is now handed to the returning listener instead, matching the framework's `MultiFrameImageStreamCompleter`. Animated images still resume decoding. Reported by [@tranhuudang](https://github.com/tranhuudang) (issue #67).

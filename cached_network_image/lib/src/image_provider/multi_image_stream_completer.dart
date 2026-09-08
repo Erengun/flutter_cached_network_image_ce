@@ -91,7 +91,6 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   bool __disposed = false;
 
   void _switchToNewCodec() {
-    _framesEmitted = 0;
     _timer = null;
     _handleCodecReady(_nextImageCodec!);
     _nextImageCodec = null;
@@ -178,8 +177,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   }
 
   void _emitFrame(ImageInfo imageInfo) {
-    setImage(imageInfo);
+    // Count the frame before setImage, which notifies listeners synchronously:
+    // a listener that drops and re-adds itself from that callback must not see
+    // a state that claims nothing has been emitted from this codec yet.
     _framesEmitted += 1;
+    setImage(imageInfo);
   }
 
   @override

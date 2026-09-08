@@ -12,7 +12,8 @@ void main() {
   const url = 'https://example.com/image.png';
 
   group('CachedNetworkImage.preCache', () {
-    test('downloads and returns FileInfo, passing cacheKey and headers '
+    test(
+        'downloads and returns FileInfo, passing cacheKey and headers '
         'through to getFileStream', () async {
       const cacheKey = 'custom-key';
       final headers = {'Authorization': 'Bearer token'};

@@ -344,8 +344,7 @@ void main() {
     // The listener drops while the frame is still decoding, so the frame
     // arrives with nothing to emit it to and is retained.
     imageStream.removeListener(streamListener);
-    final frame =
-        FakeFrameInfo(const Duration(milliseconds: 200), image20x10);
+    final frame = FakeFrameInfo(const Duration(milliseconds: 200), image20x10);
     mockCodec.completeNextFrame(frame);
     await tester.idle();
     expect(frame.image.debugDisposed, false);

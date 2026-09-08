@@ -72,6 +72,16 @@ class CachedNetworkImage extends StatefulWidget {
   /// When [maxWidthDiskCache] or [maxHeightDiskCache] are provided and the
   /// [cacheManager] supports [ImageCacheManager], the resized variant is
   /// cached.
+  ///
+  /// Waits for the cache manager to finish refreshing an expired cache
+  /// entry before returning. If the refresh fails and only the stale
+  /// cached file remains, this throws a [StateError] rather than
+  /// returning that stale file as if it were success.
+  ///
+  /// [timeout], if given, is applied between events on the underlying
+  /// stream via [Stream.timeout] and throws a [TimeoutException] when
+  /// exceeded. It unblocks the caller but does not cancel the in-flight
+  /// download.
   static Future<FileInfo> preCache({
     required String imageUrl,
     String? cacheKey,
@@ -79,18 +89,20 @@ class CachedNetworkImage extends StatefulWidget {
     BaseCacheManager? cacheManager,
     int? maxWidthDiskCache,
     int? maxHeightDiskCache,
+    Duration? timeout,
   }) async {
-    final cm = cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
+    final cm = _effectiveCacheManager(cacheManager);
 
-    assert(
-      cm is ImageCacheManager ||
-          (maxWidthDiskCache == null && maxHeightDiskCache == null),
-      'To resize the image the CacheManager needs to be an '
-      'ImageCacheManager. maxWidthDiskCache and maxHeightDiskCache will '
-      'be ignored when a normal CacheManager is used.',
-    );
+    if (cm is! ImageCacheManager &&
+        (maxWidthDiskCache != null || maxHeightDiskCache != null)) {
+      throw ArgumentError(
+        'To resize the image the CacheManager needs to be an '
+        'ImageCacheManager. maxWidthDiskCache and maxHeightDiskCache will '
+        'be ignored when a normal CacheManager is used.',
+      );
+    }
 
-    final Stream<FileResponse> stream;
+    Stream<FileResponse> stream;
     if (cm is ImageCacheManager &&
         (maxWidthDiskCache != null || maxHeightDiskCache != null)) {
       stream = cm.getImageFile(
@@ -107,6 +119,9 @@ class CachedNetworkImage extends StatefulWidget {
         headers: headers,
       );
     }
+    if (timeout != null) {
+      stream = stream.timeout(timeout);
+    }
 
     // Drain the entire stream and return the last FileInfo. This ensures
     // that when the cache manager yields a stale entry followed by a
@@ -117,6 +132,16 @@ class CachedNetworkImage extends StatefulWidget {
     }
     if (result == null) {
       throw StateError('Cache manager completed without providing a file');
+    }
+    // A successful refresh always yields a FileInfo sourced from the
+    // network (see DefaultCacheManager._downloadFile), so a Cache-sourced
+    // result that is still expired means the refresh silently failed.
+    if (result.source == FileSource.Cache &&
+        result.validTill.isBefore(DateTime.now())) {
+      throw StateError(
+        'preCache failed to refresh $imageUrl: the cache manager only '
+        'returned a stale cached file.',
+      );
     }
     return result;
   }
@@ -132,8 +157,7 @@ class CachedNetworkImage extends StatefulWidget {
     double scale = 1,
     Duration minimumGifFrameDuration = const Duration(milliseconds: 100),
   }) async {
-    final effectiveCacheManager =
-        cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
+    final effectiveCacheManager = _effectiveCacheManager(cacheManager);
     await effectiveCacheManager.removeFile(cacheKey ?? url);
     return CachedNetworkImageProvider(
       url,
@@ -141,6 +165,11 @@ class CachedNetworkImage extends StatefulWidget {
       minimumGifFrameDuration: minimumGifFrameDuration,
     ).evict();
   }
+
+  static BaseCacheManager _effectiveCacheManager(
+    BaseCacheManager? cacheManager,
+  ) =>
+      cacheManager ?? CachedNetworkImageProvider.defaultCacheManager;
 
   /// Option to use cacheManager with other settings
   final BaseCacheManager? cacheManager;

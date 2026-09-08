@@ -12,12 +12,17 @@ void main() {
   const url = 'https://example.com/image.png';
 
   group('CachedNetworkImage.preCache', () {
-    test('downloads and returns FileInfo via getFileStream', () async {
+    test('downloads and returns FileInfo, passing cacheKey and headers '
+        'through to getFileStream', () async {
+      const cacheKey = 'custom-key';
+      final headers = {'Authorization': 'Bearer token'};
       final cacheManager = FakeCacheManager();
       cacheManager.returns(url, kTransparentImage);
 
       final result = await CachedNetworkImage.preCache(
         imageUrl: url,
+        cacheKey: cacheKey,
+        headers: headers,
         cacheManager: cacheManager,
       );
 
@@ -26,49 +31,7 @@ void main() {
       verify(
         () => cacheManager.getFileStream(
           url,
-          key: any(named: 'key'),
-          headers: any(named: 'headers'),
-          withProgress: any(named: 'withProgress'),
-        ),
-      ).called(1);
-    });
-
-    test('passes cacheKey as key to getFileStream', () async {
-      const cacheKey = 'custom-key';
-      final cacheManager = FakeCacheManager();
-      cacheManager.returns(url, kTransparentImage);
-
-      await CachedNetworkImage.preCache(
-        imageUrl: url,
-        cacheKey: cacheKey,
-        cacheManager: cacheManager,
-      );
-
-      verify(
-        () => cacheManager.getFileStream(
-          url,
           key: cacheKey,
-          headers: any(named: 'headers'),
-          withProgress: any(named: 'withProgress'),
-        ),
-      ).called(1);
-    });
-
-    test('passes headers to getFileStream', () async {
-      final headers = {'Authorization': 'Bearer token'};
-      final cacheManager = FakeCacheManager();
-      cacheManager.returns(url, kTransparentImage);
-
-      await CachedNetworkImage.preCache(
-        imageUrl: url,
-        headers: headers,
-        cacheManager: cacheManager,
-      );
-
-      verify(
-        () => cacheManager.getFileStream(
-          url,
-          key: any(named: 'key'),
           headers: headers,
           withProgress: any(named: 'withProgress'),
         ),
@@ -151,5 +114,73 @@ void main() {
         throwsA(isA<HttpExceptionWithStatus>()),
       );
     });
+
+    test('throws when only a stale cached file is returned', () async {
+      final staleFile =
+          MemoryFileSystem().systemTempDirectory.childFile('stale.jpg');
+      staleFile.writeAsBytesSync(kTransparentImage);
+      final staleInfo = FileInfo(
+        staleFile,
+        FileSource.Cache,
+        DateTime.now().subtract(const Duration(hours: 1)),
+        url,
+      );
+
+      final cacheManager = FakeCacheManager();
+      when(
+        () => cacheManager.getFileStream(
+          url,
+          key: any(named: 'key'),
+          headers: any(named: 'headers'),
+          withProgress: any(named: 'withProgress'),
+        ),
+      ).thenAnswer((_) => Stream.value(staleInfo));
+
+      expect(
+        () => CachedNetworkImage.preCache(
+          imageUrl: url,
+          cacheManager: cacheManager,
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('throws TimeoutException when timeout elapses', () async {
+      final cacheManager = FakeCacheManager();
+      when(
+        () => cacheManager.getFileStream(
+          url,
+          key: any(named: 'key'),
+          headers: any(named: 'headers'),
+          withProgress: any(named: 'withProgress'),
+        ),
+      ).thenAnswer((_) => StreamController<FileResponse>().stream);
+
+      expect(
+        () => CachedNetworkImage.preCache(
+          imageUrl: url,
+          cacheManager: cacheManager,
+          timeout: const Duration(milliseconds: 10),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test(
+      'throws ArgumentError when resize params are used with a plain '
+      'CacheManager',
+      () async {
+        final cacheManager = FakeCacheManager();
+
+        expect(
+          () => CachedNetworkImage.preCache(
+            imageUrl: url,
+            cacheManager: cacheManager,
+            maxWidthDiskCache: 200,
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+      },
+    );
   });
 }

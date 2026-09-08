@@ -1,6 +1,6 @@
 ## [4.11.0] - 2026-09-01
 
-* **Feature:** Added `CachedNetworkImage.preCache()` static method for downloading and caching images without rendering them. Useful for warming the cache before navigation. Supports optional `cacheKey`, `headers`, custom `cacheManager`, and disk-resize parameters (`maxWidthDiskCache`, `maxHeightDiskCache`).
+* **Feature:** Added `CachedNetworkImage.preCache()` static method for downloading and caching images without rendering them. Useful for warming the cache before navigation. Supports optional `cacheKey`, `headers`, custom `cacheManager`, disk-resize parameters (`maxWidthDiskCache`, `maxHeightDiskCache`), and an optional `timeout`. Throws a `StateError` instead of silently returning a stale file when refreshing an expired cache entry fails, and an `ArgumentError` (not just an `assert`) when resize parameters are used with a `CacheManager` that isn't an `ImageCacheManager`.
 
 ## [4.10.1] - 2026-08-26
 

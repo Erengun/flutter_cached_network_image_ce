@@ -89,9 +89,9 @@ class ImageLoader implements platform.ImageLoader {
       assert(
           cacheManager is ImageCacheManager ||
               (maxWidth == null && maxHeight == null),
-          'To resize the image with a CacheManager the '
-          'CacheManager needs to be an ImageCacheManager. maxWidth and '
-          'maxHeight will be ignored when a normal CacheManager is used.');
+          'To resize the image the CacheManager needs to be an '
+          'ImageCacheManager. maxWidth and maxHeight will be ignored when '
+          'a normal CacheManager is used.');
 
       // A cache manager can delete a cached file during its own eviction
       // sweep after it has already handed out the FileInfo pointing at it,

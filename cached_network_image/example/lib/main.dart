@@ -360,9 +360,12 @@ class _PreCacheContentState extends State<PreCacheContent> {
 
 /// Demonstrates the two ways to stop an animated image.
 ///
-/// [CachedNetworkImage.animate] is part of the image provider key, so turning
-/// it off resolves a new image stream and the GIF restarts from its first
-/// frame. [TickerMode] pauses and resumes the running animation in place.
+/// [CachedNetworkImage.animate] is part of the image provider key, so toggling
+/// it resolves a different image stream: the image goes blank while that
+/// stream resolves, and which frame it comes back on depends on whether its
+/// key is still held by the `ImageCache` — switching animation back on is
+/// likely to resume where it left off rather than restart. [TickerMode]
+/// pauses and resumes the running animation in place, with no key change.
 ///
 /// Both images ask for [ImageRenderMethodForWeb.HttpGet] because the web
 /// default, `HtmlImage`, decodes through an `<img>` element whose codec

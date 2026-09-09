@@ -292,6 +292,63 @@ does not cancel the underlying download. `maxWidthDiskCache` /
 `maxHeightDiskCache` throw an `ArgumentError` when `cacheManager` isn't an
 `ImageCacheManager`.
 
+### Animated Images (GIF)
+
+Set `animate: false` to show only the first frame of a multi-frame image.
+The remaining frames are never decoded.
+
+```dart
+CachedNetworkImage(
+  imageUrl: 'https://example.com/animation.gif',
+  animate: false,
+)
+```
+
+Only the frame callbacks and the `getNextFrame()` calls for the remaining
+frames are skipped. The whole file is still downloaded, cached, read back
+and decoded into a codec, so `animate: false` is not a way to save bandwidth
+or memory on large GIFs.
+
+`animate` is part of the image provider key, so toggling it at runtime
+resolves a different image stream. The widget paints nothing while that
+stream resolves, and which frame it starts on depends on whether its key is
+still held by the `ImageCache` — an animation that played before is likely
+to resume where it left off rather than restart. To pause and resume in
+place without changing the key, wrap the widget in a `TickerMode` instead:
+
+```dart
+TickerMode(
+  enabled: !paused,
+  child: CachedNetworkImage(imageUrl: 'https://example.com/animation.gif'),
+)
+```
+
+`MediaQueryData.disableAnimations` pauses animated images the same way.
+Both need Flutter 3.41 or newer to show the first frame when the image
+loads while already paused ([flutter/flutter#176492](https://github.com/flutter/flutter/pull/176492));
+on older versions a widget that mounts paused stays blank until it resumes.
+`animate: false` has no such requirement and works on every supported
+Flutter version.
+
+On the web this only applies to `ImageRenderMethodForWeb.HttpGet`. The
+default, `HtmlImage`, decodes through an `<img>` element whose codec reports
+a single frame (`HtmlImageElementCodec.frameCount => 1` in the Flutter web
+engine), so animated images never play there and there is nothing for
+`animate` or `TickerMode` to stop:
+
+```dart
+CachedNetworkImage(
+  imageUrl: 'https://example.com/animation.gif',
+  imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+)
+```
+
+If you need full playback control (play, pause, seek), read the bytes from
+the cache manager yourself (`DefaultCacheManager().getFileStream(url)`, or
+`DefaultCacheManagerWeb` on the web) and hand them to a package such as
+`gif_view`. `CachedNetworkImageProvider` cannot do this: every load path it
+offers returns an `ImageStreamCompleter`, never the bytes.
+
 ### Unsupported Image Formats (SVG, JXL, AVIF, HEIC, ...)
 
 Flutter's built-in image codec can't decode every format. SVG never works

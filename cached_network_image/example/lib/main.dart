@@ -34,7 +34,7 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('CachedNetworkImage CE'),
@@ -46,6 +46,7 @@ class HomePage extends StatelessWidget {
               Tab(icon: Icon(Icons.grid_on), text: 'Grid'),
               Tab(icon: Icon(Icons.speed), text: 'Benchmark'),
               Tab(icon: Icon(Icons.download_done), text: 'PreCache'),
+              Tab(icon: Icon(Icons.gif), text: 'Animate'),
             ],
           ),
         ),
@@ -56,6 +57,7 @@ class HomePage extends StatelessWidget {
             GridContent(),
             BenchmarkContent(),
             PreCacheContent(),
+            AnimateContent(),
           ],
         ),
       ),
@@ -350,6 +352,87 @@ class _PreCacheContentState extends State<PreCacheContent> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Demonstrates the two ways to stop an animated image.
+///
+/// [CachedNetworkImage.animate] is part of the image provider key, so turning
+/// it off resolves a new image stream and the GIF restarts from its first
+/// frame. [TickerMode] pauses and resumes the running animation in place.
+///
+/// Both images ask for [ImageRenderMethodForWeb.HttpGet] because the web
+/// default, `HtmlImage`, decodes through an `<img>` element whose codec
+/// reports a single frame. Animated images never play on that path, so
+/// there would be nothing to stop. The option is ignored off the web.
+class AnimateContent extends StatefulWidget {
+  const AnimateContent({super.key});
+
+  @override
+  State<AnimateContent> createState() => _AnimateContentState();
+}
+
+class _AnimateContentState extends State<AnimateContent> {
+  static const _gifUrl =
+      'https://upload.wikimedia.org/wikipedia/commons/d/d3/Newtons_cradle_animation_book_2.gif';
+
+  bool _animate = true;
+  bool _ticking = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          SwitchListTile(
+            title: const Text('animate'),
+            subtitle: const Text('Freezes on the first frame. Switching back '
+                'on resolves a different provider key.'),
+            value: _animate,
+            onChanged: (value) => setState(() => _animate = value),
+          ),
+          SizedBox(
+            height: 200,
+            child: CachedNetworkImage(
+              imageUrl: _gifUrl,
+              // Both demos load the same URL, and everything the provider
+              // compares is otherwise equal, so without distinct cache keys
+              // they would share one completer and neither switch would
+              // demonstrate anything.
+              cacheKey: '\$_gifUrl#animate',
+              animate: _animate,
+              imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+              placeholder: (context, url) => const CircularProgressIndicator(),
+              errorBuilder: (context, error, stackTrace) =>
+                  const Icon(Icons.error),
+            ),
+          ),
+          const Divider(height: 32),
+          SwitchListTile(
+            title: const Text('TickerMode'),
+            subtitle: const Text('Pauses and resumes in place. Also what '
+                'MediaQueryData.disableAnimations uses.'),
+            value: _ticking,
+            onChanged: (value) => setState(() => _ticking = value),
+          ),
+          SizedBox(
+            height: 200,
+            child: TickerMode(
+              enabled: _ticking,
+              child: CachedNetworkImage(
+                imageUrl: _gifUrl,
+                cacheKey: '\$_gifUrl#ticker',
+                imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                placeholder: (context, url) =>
+                    const CircularProgressIndicator(),
+                errorBuilder: (context, error, stackTrace) =>
+                    const Icon(Icons.error),
+              ),
+            ),
+          ),
         ],
       ),
     );

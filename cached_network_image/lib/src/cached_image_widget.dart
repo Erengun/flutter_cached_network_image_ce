@@ -148,8 +148,12 @@ class CachedNetworkImage extends StatefulWidget {
 
   /// Evict an image from both the disk file based caching system of the
   /// [BaseCacheManager] as the in memory [ImageCache] of the [ImageProvider].
-  /// [url] is used by both the disk and memory cache. The scale is only used
-  /// to clear the image from the [ImageCache].
+  /// [url] is used by both the disk and memory cache. The [cacheKey] and
+  /// [scale] are only used to clear the image from the [ImageCache], and must
+  /// match the ones the widget was rendered with.
+  ///
+  /// [animate] is part of the provider key too, but the caller is not expected
+  /// to know which value the widget used, so both variants are evicted.
   static Future<bool> evictFromCache(
     String url, {
     String? cacheKey,
@@ -159,11 +163,18 @@ class CachedNetworkImage extends StatefulWidget {
   }) async {
     final effectiveCacheManager = _effectiveCacheManager(cacheManager);
     await effectiveCacheManager.removeFile(cacheKey ?? url);
-    return CachedNetworkImageProvider(
-      url,
-      scale: scale,
-      minimumGifFrameDuration: minimumGifFrameDuration,
-    ).evict();
+    var evicted = false;
+    for (final animate in const [true, false]) {
+      final wasCached = await CachedNetworkImageProvider(
+        url,
+        cacheKey: cacheKey,
+        scale: scale,
+        minimumGifFrameDuration: minimumGifFrameDuration,
+        animate: animate,
+      ).evict();
+      evicted = evicted || wasCached;
+    }
+    return evicted;
   }
 
   static BaseCacheManager _effectiveCacheManager(
@@ -353,6 +364,18 @@ class CachedNetworkImage extends StatefulWidget {
   /// durations are extremely short.
   final Duration minimumGifFrameDuration;
 
+  /// Whether multi-frame images, such as GIFs, play automatically.
+  ///
+  /// When false only the first frame is shown and the image is frozen there.
+  /// Defaults to true.
+  ///
+  /// This is part of the image provider key, so toggling it at runtime
+  /// resolves a different image stream. The widget paints nothing while that
+  /// stream resolves, and which frame it starts on depends on whether its key
+  /// is still held by the [ImageCache]. Wrap the widget in a [TickerMode]
+  /// instead to pause and resume an animation in place.
+  final bool animate;
+
   /// When true (the default), the placeholder and fade-in/out animations are
   /// skipped when the image is already available in the disk cache. This
   /// prevents an unnecessary visual flicker for images that load almost
@@ -401,6 +424,7 @@ class CachedNetworkImage extends StatefulWidget {
     this.imageRenderMethodForWeb = ImageRenderMethodForWeb.HtmlImage,
     this.scale = 1.0,
     this.minimumGifFrameDuration = const Duration(milliseconds: 100),
+    this.animate = true,
     this.disablePlaceholderOnCacheHit = true,
   });
 
@@ -450,7 +474,8 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
         oldWidget.maxHeightDiskCache != widget.maxHeightDiskCache ||
         oldWidget.imageRenderMethodForWeb != widget.imageRenderMethodForWeb ||
         oldWidget.scale != widget.scale ||
-        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration;
+        oldWidget.minimumGifFrameDuration != widget.minimumGifFrameDuration ||
+        oldWidget.animate != widget.animate;
 
     // `errorListener` is a callback, and most callers pass a new closure on
     // every build (it can't reasonably be expected to stay identical across
@@ -488,6 +513,7 @@ class _CachedNetworkImageState extends State<CachedNetworkImage> {
       errorListener: widget.errorListener,
       scale: widget.scale,
       minimumGifFrameDuration: widget.minimumGifFrameDuration,
+      animate: widget.animate,
     );
   }
 

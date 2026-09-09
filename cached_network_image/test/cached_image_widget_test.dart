@@ -1,7 +1,9 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:octo_image/octo_image.dart';
 
 import 'fake_cache_manager.dart';
 import 'image_data.dart';
@@ -33,6 +35,58 @@ void main() {
 
       verify(() => mockCacheManager.removeFile('https://example.com/img.png'))
           .called(1);
+    });
+
+    test('evicts the cache entry of a paused image', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final mockCacheManager = MockBaseCacheManager();
+      when(() => mockCacheManager.removeFile(any())).thenAnswer((_) async {});
+      const url = 'https://example.com/img.gif';
+      const provider = CachedNetworkImageProvider(url, animate: false);
+
+      final image = await createTestImage();
+      PaintingBinding.instance.imageCache.putIfAbsent(
+        provider,
+        () => OneFrameImageStreamCompleter(
+          SynchronousFuture<ImageInfo>(ImageInfo(image: image)),
+        ),
+      );
+      expect(PaintingBinding.instance.imageCache.containsKey(provider), isTrue);
+
+      // The caller does not have to know which `animate` the widget used, and
+      // the result reports the eviction whichever variant it matched.
+      final evicted = await CachedNetworkImage.evictFromCache(
+        url,
+        cacheManager: mockCacheManager,
+      );
+      expect(evicted, isTrue);
+
+      expect(PaintingBinding.instance.imageCache.containsKey(provider), isFalse);
+    });
+
+    test('evicts the cache entry of an image with a cacheKey', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final mockCacheManager = MockBaseCacheManager();
+      when(() => mockCacheManager.removeFile(any())).thenAnswer((_) async {});
+      const url = 'https://example.com/keyed.png';
+      const provider = CachedNetworkImageProvider(url, cacheKey: 'custom-key');
+
+      final image = await createTestImage();
+      PaintingBinding.instance.imageCache.putIfAbsent(
+        provider,
+        () => OneFrameImageStreamCompleter(
+          SynchronousFuture<ImageInfo>(ImageInfo(image: image)),
+        ),
+      );
+      expect(PaintingBinding.instance.imageCache.containsKey(provider), isTrue);
+
+      await CachedNetworkImage.evictFromCache(
+        url,
+        cacheKey: 'custom-key',
+        cacheManager: mockCacheManager,
+      );
+
+      expect(PaintingBinding.instance.imageCache.containsKey(provider), isFalse);
     });
 
     test('uses cacheKey when provided', () async {
@@ -209,6 +263,27 @@ void main() {
       );
       await tester.pump();
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('passes animate to the image provider', (tester) async {
+      var imageUrl = 'animate-test';
+      cacheManager.returns(imageUrl, kTransparentImage);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CachedNetworkImage(
+              imageUrl: imageUrl,
+              cacheManager: cacheManager,
+              animate: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final octoImage = tester.widget<OctoImage>(find.byType(OctoImage));
+      expect((octoImage.image as CachedNetworkImageProvider).animate, isFalse);
     });
 
     testWidgets('useOldImageOnUrlChange works without error', (tester) async {

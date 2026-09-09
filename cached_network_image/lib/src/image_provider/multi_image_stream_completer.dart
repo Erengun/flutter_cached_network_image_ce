@@ -22,6 +22,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     Stream<ImageChunkEvent>? chunkEvents,
     InformationCollector? informationCollector,
     this.minimumGifFrameDuration = const Duration(milliseconds: 100),
+    this.animate = true,
   })  : _informationCollector = informationCollector,
         _scale = scale {
     codec.listen(
@@ -70,6 +71,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   ///
   /// Defaults to 100ms.
   final Duration minimumGifFrameDuration;
+
+  /// Whether multi-frame images, such as GIFs, play automatically.
+  ///
+  /// When false only the first frame is decoded and emitted; the image is
+  /// frozen there. Defaults to true.
+  final bool animate;
+
   ui.FrameInfo? _nextFrame;
 
   // When the current was first shown.
@@ -108,6 +116,15 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     final previousCodec = _codec;
     _codec = codec;
     _framesEmitted = 0;
+    if (!animate) {
+      // A paused image has no cycle to keep in step with, so the incoming
+      // codec's first frame is a first frame again. Leaving the outgoing
+      // codec's timing in place would hold the replacement back for up to a
+      // frame duration and arm a timer that nothing in the paused lifecycle
+      // ever clears, stranding every codec that follows.
+      _frameDuration = null;
+      _shownTimestamp = null;
+    }
 
     if (previousCodec != null &&
         previousCodec != codec &&
@@ -170,6 +187,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   }
 
   Future<void> _decodeNextFrameAndSchedule() async {
+    if (!animate && _framesEmitted > 0) {
+      // Paused: the current codec has shown its first frame and nothing more
+      // should be decoded from it, including when a listener is re-added.
+      return;
+    }
     final codec = _codec!;
     if (_decodingCodecs.contains(codec)) {
       // A decode of this codec is already pending. A second concurrent decode
@@ -254,10 +276,17 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // codec renders black on the web, where CanvasKit images lazily reference a
     // single shared <img> element that is cleared when the previous frame is
     // disposed.
-    if (!hasListeners &&
-        _codec != null &&
-        (_framesEmitted == 0 || _codec!.frameCount > 1)) {
-      _decodeNextFrameAndSchedule();
+    if (!hasListeners && _codec != null) {
+      if (!animate && _nextFrame != null) {
+        // A frame decoded for the departed listener is still in hand. A
+        // paused image shows that one rather than decoding again, which
+        // would drop it and advance the codec past the frame the image is
+        // meant to stop on. An animating image keeps re-decoding, as its
+        // held frame is stale by the time a listener returns.
+        _scheduleAppFrame();
+      } else if (_framesEmitted == 0 || _codec!.frameCount > 1) {
+        _decodeNextFrameAndSchedule();
+      }
     }
     super.addListener(listener);
   }

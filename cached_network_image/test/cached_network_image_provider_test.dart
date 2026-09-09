@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fake_cache_manager.dart';
+import 'image_data.dart';
+
 void main() {
   group('CachedNetworkImageProvider', () {
     group('equality', () {
@@ -93,6 +96,18 @@ void main() {
         expect(a, isNot(equals(b)));
       });
 
+      test('different animate are not equal', () {
+        const a = CachedNetworkImageProvider(
+          'https://example.com/img.gif',
+        );
+        const b = CachedNetworkImageProvider(
+          'https://example.com/img.gif',
+          animate: false,
+        );
+        expect(a, isNot(equals(b)));
+        expect(a.hashCode, isNot(equals(b.hashCode)));
+      });
+
       test('not equal to non-CachedNetworkImageProvider', () {
         const a = CachedNetworkImageProvider('https://example.com/img.png');
         expect(a == Object(), isFalse);
@@ -141,6 +156,47 @@ void main() {
         expect(result, contains('https://example.com/img.png'));
         expect(result, contains('2.0'));
         expect(result, contains('0:00:00.150000'));
+      });
+    });
+
+    group('animate', () {
+      test('is handed to the completer by loadImage', () {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        final cacheManager = FakeCacheManager();
+        cacheManager.returns('animate-load-image', kTransparentImage);
+        final provider = CachedNetworkImageProvider(
+          'animate-load-image',
+          cacheManager: cacheManager,
+          animate: false,
+        );
+
+        final completer = provider.loadImage(
+          provider,
+          PaintingBinding.instance.instantiateImageCodecWithSize,
+        ) as MultiImageStreamCompleter;
+
+        expect(completer.animate, isFalse);
+      });
+
+      test('is handed to the completer by loadBuffer', () {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        final cacheManager = FakeCacheManager();
+        cacheManager.returns('animate-load-buffer', kTransparentImage);
+        final provider = CachedNetworkImageProvider(
+          'animate-load-buffer',
+          cacheManager: cacheManager,
+          animate: false,
+        );
+
+        final completer = provider
+            // ignore: deprecated_member_use_from_same_package
+            .loadBuffer(
+          provider,
+          // ignore: deprecated_member_use
+          PaintingBinding.instance.instantiateImageCodecFromBuffer,
+        ) as MultiImageStreamCompleter;
+
+        expect(completer.animate, isFalse);
       });
     });
 

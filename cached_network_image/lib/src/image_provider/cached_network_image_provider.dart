@@ -24,6 +24,7 @@ class CachedNetworkImageProvider
     this.maxWidth,
     this.scale = 1.0,
     this.minimumGifFrameDuration = const Duration(milliseconds: 100),
+    this.animate = true,
     this.errorListener,
     this.headers,
     this.cacheManager,
@@ -49,6 +50,19 @@ class CachedNetworkImageProvider
   /// The minimum frame duration applied to GIF images when decoded frame
   /// durations are extremely short.
   final Duration minimumGifFrameDuration;
+
+  /// Whether multi-frame images, such as GIFs, play automatically.
+  ///
+  /// When false only the first frame is shown and the image is frozen there.
+  /// Defaults to true.
+  ///
+  /// This is part of the provider key, so toggling it at runtime resolves a
+  /// different image stream. Which frame that stream starts on depends on
+  /// whether its key is still held by the [ImageCache]: an animation that
+  /// played before is likely to resume where it left off rather than restart.
+  /// Use [TickerMode] instead to pause and resume in place without changing
+  /// the key.
+  final bool animate;
 
   /// Listener to be called when images fails to load.
   ///
@@ -96,6 +110,7 @@ class CachedNetworkImageProvider
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
       minimumGifFrameDuration: key.minimumGifFrameDuration,
+      animate: key.animate,
       informationCollector: () => <DiagnosticsNode>[
         DiagnosticsProperty<ImageProvider>('Image provider', this),
         DiagnosticsProperty<CachedNetworkImageProvider>('Image key', key),
@@ -170,6 +185,7 @@ class CachedNetworkImageProvider
       chunkEvents: chunkEvents.stream,
       scale: key.scale,
       minimumGifFrameDuration: key.minimumGifFrameDuration,
+      animate: key.animate,
       informationCollector: () => <DiagnosticsNode>[
         DiagnosticsProperty<ImageProvider>('Image provider', this),
         DiagnosticsProperty<CachedNetworkImageProvider>('Image key', key),
@@ -238,6 +254,7 @@ class CachedNetworkImageProvider
       return ((cacheKey ?? url) == (other.cacheKey ?? other.url)) &&
           scale == other.scale &&
           minimumGifFrameDuration == other.minimumGifFrameDuration &&
+          animate == other.animate &&
           maxHeight == other.maxHeight &&
           maxWidth == other.maxWidth;
     }
@@ -249,6 +266,7 @@ class CachedNetworkImageProvider
         cacheKey ?? url,
         scale,
         minimumGifFrameDuration,
+        animate,
         maxHeight,
         maxWidth,
       );
@@ -257,6 +275,7 @@ class CachedNetworkImageProvider
   String toString() => 'CachedNetworkImageProvider('
       '"$url", '
       'scale: $scale, '
-      'minimumGifFrameDuration: $minimumGifFrameDuration'
+      'minimumGifFrameDuration: $minimumGifFrameDuration, '
+      'animate: $animate'
       ')';
 }

@@ -1,3 +1,8 @@
+## [4.12.0] - 2026-09-08
+
+* **Feature:** Added `animate` to `CachedNetworkImage` and `CachedNetworkImageProvider` (default `true`). With `animate: false` a multi-frame image such as a GIF shows its first frame and stops there, without decoding the rest. `animate` is part of the provider key, so toggling it at runtime resolves a different image stream: the widget paints nothing while that stream resolves, and which frame it starts on depends on what the `ImageCache` still holds. Wrap the widget in a `TickerMode` to pause and resume an animation in place. Requested in issue #21.
+* **Fix:** `CachedNetworkImage.evictFromCache` now forwards `cacheKey` to the provider it evicts and clears both the `animate: true` and `animate: false` entries, so the in-memory `ImageCache` eviction is no longer a silent no-op for images rendered with a `cacheKey` or with `animate: false`.
+
 ## [4.11.1] - 2026-09-08
 
 * **Fix:** Images turned black on web after the widget was scrolled out of view and back. `MultiImageStreamCompleter` re-decoded the codec on every 0→1 listener transition; for a single-frame image on CanvasKit that produces a second lazy `ui.Image` sharing one `<img>` element, and emitting it disposes the previous image, which clears that element's `src`. The already decoded frame is now handed to the returning listener instead. Animated images still resume decoding. Reported by [@tranhuudang](https://github.com/tranhuudang) (issue #67).

@@ -61,7 +61,8 @@ void main() {
       );
       expect(evicted, isTrue);
 
-      expect(PaintingBinding.instance.imageCache.containsKey(provider), isFalse);
+      expect(
+          PaintingBinding.instance.imageCache.containsKey(provider), isFalse);
     });
 
     test('evicts the cache entry of an image with a cacheKey', () async {
@@ -86,7 +87,8 @@ void main() {
         cacheManager: mockCacheManager,
       );
 
-      expect(PaintingBinding.instance.imageCache.containsKey(provider), isFalse);
+      expect(
+          PaintingBinding.instance.imageCache.containsKey(provider), isFalse);
     });
 
     test('uses cacheKey when provided', () async {

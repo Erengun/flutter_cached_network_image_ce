@@ -10,6 +10,11 @@ import 'package:flutter/scheduler.dart';
 double get timeDilation => _timeDilation;
 double _timeDilation = 1;
 
+const _maxCatchUpFrames = 4;
+
+// Lag beyond one frame plus this restarts the timeline instead of bursting.
+const _resyncThreshold = Duration(milliseconds: 100);
+
 /// An ImageStreamCompleter with support for loading multiple images.
 class MultiImageStreamCompleter extends ImageStreamCompleter {
   /// The constructor to create an MultiImageStreamCompleter. The [codec]
@@ -80,15 +85,17 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
   ui.FrameInfo? _nextFrame;
 
-  // When the current was first shown.
+  // When the current frame started on the animation's ideal timeline.
   Duration? _shownTimestamp;
 
   // The requested duration for the current frame;
   Duration? _frameDuration;
 
-  // How many frames have been emitted so far.
+  // How many frames have been emitted or skipped so far.
   int _framesEmitted = 0;
   Timer? _timer;
+
+  Duration? _lastAppFrameTimestamp;
   StreamSubscription<ImageChunkEvent>? _chunkSubscription;
 
   // Used to guard against registering multiple _handleAppFrame callbacks for the same frame.
@@ -156,11 +163,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
       // start a decode, whose prologue would otherwise release the frame still
       // being read here.
       _nextFrame = null;
-      _shownTimestamp = timestamp;
-      _frameDuration = clampGifFrameDuration(
+      final frameDuration = clampGifFrameDuration(
         nextFrame.duration,
         minimumGifFrameDuration: minimumGifFrameDuration,
       );
+      _shownTimestamp = _nextShownTimestamp(timestamp, frameDuration);
+      _frameDuration = frameDuration;
+      _lastAppFrameTimestamp = timestamp;
       _emitFrame(ImageInfo(image: nextFrame.image.clone(), scale: _scale));
       nextFrame.image.dispose();
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
@@ -186,7 +195,48 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     return timestamp - _shownTimestamp! >= _frameDuration!;
   }
 
-  Future<void> _decodeNextFrameAndSchedule() async {
+  // Anchoring to the app frame rounds every frame up to a vsync and slows
+  // playback (https://github.com/flutter/flutter/issues/24804).
+  Duration _nextShownTimestamp(Duration timestamp, Duration frameDuration) {
+    final shownTimestamp = _shownTimestamp;
+    final previousDuration = _frameDuration;
+    if (_framesEmitted == 0 ||
+        _lastAppFrameTimestamp == null ||
+        shownTimestamp == null ||
+        previousDuration == null) {
+      return timestamp;
+    }
+    final deadline = shownTimestamp + previousDuration;
+    if (timestamp - deadline > frameDuration + _resyncThreshold) {
+      return timestamp;
+    }
+    return deadline;
+  }
+
+  // The last frame of a cycle is never skipped, as cycle ends drive codec
+  // swaps and repetition limits.
+  bool _shouldSkipFrame(ui.FrameInfo frame, ui.Codec codec, int skipped) {
+    final lastAppFrame = _lastAppFrameTimestamp;
+    final shownTimestamp = _shownTimestamp;
+    final frameDuration = _frameDuration;
+    if (!animate ||
+        !hasListeners ||
+        skipped >= _maxCatchUpFrames ||
+        _framesEmitted == 0 ||
+        (_framesEmitted + 1) % codec.frameCount == 0 ||
+        lastAppFrame == null ||
+        shownTimestamp == null ||
+        frameDuration == null) {
+      return false;
+    }
+    final nextDuration = clampGifFrameDuration(
+      frame.duration,
+      minimumGifFrameDuration: minimumGifFrameDuration,
+    );
+    return lastAppFrame >= shownTimestamp + frameDuration + nextDuration;
+  }
+
+  Future<void> _decodeNextFrameAndSchedule([int skipped = 0]) async {
     if (!animate && _framesEmitted > 0) {
       // Paused: the current codec has shown its first frame and nothing more
       // should be decoded from it, including when a listener is re-added.
@@ -230,6 +280,17 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     }
     if (frame == null) {
       // The decode failed and was already reported.
+      return;
+    }
+    if (_shouldSkipFrame(frame, codec, skipped)) {
+      frame.image.dispose();
+      _shownTimestamp = _shownTimestamp! + _frameDuration!;
+      _frameDuration = clampGifFrameDuration(
+        frame.duration,
+        minimumGifFrameDuration: minimumGifFrameDuration,
+      );
+      _framesEmitted += 1;
+      await _decodeNextFrameAndSchedule(skipped + 1);
       return;
     }
     _nextFrame = frame;
@@ -297,6 +358,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     if (!hasListeners) {
       _timer?.cancel();
       _timer = null;
+      _lastAppFrameTimestamp = null;
       __maybeDispose();
     }
   }

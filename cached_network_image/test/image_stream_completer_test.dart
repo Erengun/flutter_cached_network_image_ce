@@ -69,6 +69,36 @@ class MockCodec implements Codec {
   }
 }
 
+/// Decodes every frame immediately, looping forever over [durations].
+class TimedCodec implements Codec {
+  TimedCodec(this._image, this.durations);
+
+  final Image _image;
+  final List<Duration> durations;
+
+  final List<Image> decodedImages = <Image>[];
+
+  int numFramesAsked = 0;
+
+  @override
+  int get frameCount => durations.length;
+
+  @override
+  int get repetitionCount => -1;
+
+  @override
+  Future<FrameInfo> getNextFrame() {
+    final image = _image.clone();
+    decodedImages.add(image);
+    final duration = durations[numFramesAsked % durations.length];
+    numFramesAsked += 1;
+    return Future<FrameInfo>.value(FakeFrameInfo(duration, image));
+  }
+
+  @override
+  void dispose() {}
+}
+
 class FakeEventReportingImageStreamCompleter extends ImageStreamCompleter {
   FakeEventReportingImageStreamCompleter({
     Stream<ImageChunkEvent>? chunkEvents,
@@ -1613,4 +1643,123 @@ void main() {
       expect(emittedImages.last.image.isCloneOf(thirdFrame.image), true);
     },
   );
+
+  group('frame timeline', () {
+    const vsync60Hz = Duration(microseconds: 16667);
+    const vsync120Hz = Duration(microseconds: 8333);
+
+    Future<int> countEmittedFrames(
+      WidgetTester tester,
+      TimedCodec codec, {
+      required Duration vsync,
+      required int appFrames,
+    }) async {
+      var emitted = 0;
+      final imageStream = MultiImageStreamCompleter(
+        codec: Stream<Codec>.value(codec),
+        scale: 1.0,
+      );
+      final listener = ImageStreamListener((ImageInfo image, bool _) {
+        emitted += 1;
+        image.dispose();
+      });
+      imageStream.addListener(listener);
+      await tester.idle();
+      for (var i = 0; i < appFrames; i++) {
+        await tester.pump(vsync);
+      }
+      imageStream.removeListener(listener);
+      return emitted;
+    }
+
+    testWidgets('20ms frames keep wall-clock pace at 60Hz',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+      );
+      final emitted = await countEmittedFrames(
+        tester,
+        codec,
+        vsync: vsync60Hz,
+        appFrames: 600,
+      );
+      // 600 app frames of 16.667ms are 10s, which is 500 frames of 20ms.
+      expect(emitted, closeTo(500, 2));
+    });
+
+    testWidgets('20ms frames keep wall-clock pace at 120Hz',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+      );
+      final emitted = await countEmittedFrames(
+        tester,
+        codec,
+        vsync: vsync120Hz,
+        appFrames: 1200,
+      );
+      expect(emitted, closeTo(500, 2));
+    });
+
+    testWidgets('a long stall restarts the timeline instead of bursting',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+      );
+      var emitted = 0;
+      final imageStream = MultiImageStreamCompleter(
+        codec: Stream<Codec>.value(codec),
+        scale: 1.0,
+      );
+      final listener = ImageStreamListener((ImageInfo image, bool _) {
+        emitted += 1;
+        image.dispose();
+      });
+      imageStream.addListener(listener);
+      await tester.idle();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(vsync60Hz);
+      }
+      await tester.pump(const Duration(seconds: 1));
+      final emittedAfterStall = emitted;
+      final askedAfterStall = codec.numFramesAsked;
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(vsync60Hz);
+      }
+      imageStream.removeListener(listener);
+
+      // 1s at 20ms is 50 frames, all decoded ones shown.
+      expect(emitted - emittedAfterStall, closeTo(50, 2));
+      expect(
+          codec.numFramesAsked - askedAfterStall, emitted - emittedAfterStall);
+    });
+
+    testWidgets('frames shorter than a vsync are skipped to keep pace',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 12)),
+      );
+      final emitted = await countEmittedFrames(
+        tester,
+        codec,
+        vsync: vsync60Hz,
+        appFrames: 600,
+      );
+
+      // 10s of 12ms frames is 833 frames, but 600 app frames show at most 600.
+      expect(emitted, lessThanOrEqualTo(601));
+      expect(codec.numFramesAsked, closeTo(833, 10));
+      final pendingFrame = codec.decodedImages.last;
+      expect(
+        codec.decodedImages
+            .where((Image image) => image != pendingFrame)
+            .every((Image image) => image.debugDisposed),
+        isTrue,
+      );
+    });
+  });
 }

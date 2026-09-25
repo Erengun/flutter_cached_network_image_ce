@@ -1,3 +1,7 @@
+## [Unreleased]
+
+* **Fix:** Animated images played slower than their frame durations, e.g. 20ms GIF frames at 60% speed on a 60Hz display, because `MultiImageStreamCompleter` rounded every frame up to the next vsync. Frames now follow their durations on the wall-clock timeline, skipping frames that are already late when decoding is fast enough to catch up ([flutter/flutter#24804](https://github.com/flutter/flutter/issues/24804)).
+
 ## [4.12.0] - 2026-09-08
 
 * **Feature:** Added `animate` to `CachedNetworkImage` and `CachedNetworkImageProvider` (default `true`). With `animate: false` a multi-frame image such as a GIF shows its first frame and stops there, without decoding the rest. `animate` is part of the provider key, so toggling it at runtime resolves a different image stream: the widget paints nothing while that stream resolves, and which frame it starts on depends on what the `ImageCache` still holds. Wrap the widget in a `TickerMode` to pause and resume an animation in place. Requested in issue #21.

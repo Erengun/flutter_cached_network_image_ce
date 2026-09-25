@@ -9,7 +9,10 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
+import 'package:flutter/scheduler.dart' as scheduler show timeDilation;
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fake_cache_manager.dart';
 
 class FakeFrameInfo implements FrameInfo {
   const FakeFrameInfo(this._duration, this._image);
@@ -1613,4 +1616,239 @@ void main() {
       expect(emittedImages.last.image.isCloneOf(thirdFrame.image), true);
     },
   );
+
+  group('frame timeline', () {
+    const vsync60Hz = Duration(microseconds: 16667);
+    const vsync120Hz = Duration(microseconds: 8333);
+
+    Future<List<({Duration time, int frame})>> recordEmits(
+      WidgetTester tester,
+      TimedCodec codec, {
+      required Duration vsync,
+      required int appFrames,
+    }) async {
+      final emits = <({Duration time, int frame})>[];
+      final imageStream = MultiImageStreamCompleter(
+        codec: Stream<Codec>.value(codec),
+        scale: 1.0,
+      );
+      final listener = ImageStreamListener((ImageInfo image, bool _) {
+        emits.add((
+          time: SchedulerBinding.instance.currentFrameTimeStamp,
+          frame: codec.numFramesAsked - 1,
+        ));
+        image.dispose();
+      });
+      imageStream.addListener(listener);
+      await tester.idle();
+      for (var i = 0; i < appFrames; i++) {
+        await tester.pump(vsync);
+      }
+      imageStream.removeListener(listener);
+      await tester.pump(codec.decodeDelay);
+      return emits;
+    }
+
+    testWidgets('20ms frames keep wall-clock pace at 60Hz',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: vsync60Hz,
+        appFrames: 600,
+      );
+      expect(emits.length, closeTo(500, 2));
+    });
+
+    testWidgets('20ms frames keep wall-clock pace at 120Hz',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: vsync120Hz,
+        appFrames: 1200,
+      );
+      expect(emits.length, closeTo(500, 2));
+    });
+
+    testWidgets('a long stall restarts the timeline instead of bursting',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+      );
+      var emitted = 0;
+      final imageStream = MultiImageStreamCompleter(
+        codec: Stream<Codec>.value(codec),
+        scale: 1.0,
+      );
+      final listener = ImageStreamListener((ImageInfo image, bool _) {
+        emitted += 1;
+        image.dispose();
+      });
+      imageStream.addListener(listener);
+      await tester.idle();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(vsync60Hz);
+      }
+      await tester.pump(const Duration(seconds: 1));
+      final emittedAfterStall = emitted;
+      final askedAfterStall = codec.numFramesAsked;
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(vsync60Hz);
+      }
+      imageStream.removeListener(listener);
+
+      expect(emitted - emittedAfterStall, closeTo(50, 2));
+      expect(
+          codec.numFramesAsked - askedAfterStall, emitted - emittedAfterStall);
+    });
+
+    testWidgets('frames shorter than a vsync are skipped to keep pace',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 12)),
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: vsync60Hz,
+        appFrames: 600,
+      );
+
+      expect(codec.numFramesAsked - emits.length, closeTo(233, 10));
+      final pendingFrame = codec.decodedImages.last;
+      expect(
+        codec.decodedImages
+            .where((Image image) => image != pendingFrame)
+            .every((Image image) => image.debugDisposed),
+        isTrue,
+      );
+    });
+
+    testWidgets('frames are not skipped when decoding is slower than playback',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 20)),
+        decodeDelay: const Duration(milliseconds: 50),
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: vsync60Hz,
+        appFrames: 300,
+      );
+
+      expect(emits.length, closeTo(100, 2));
+      expect(codec.numFramesAsked - emits.length, lessThanOrEqualTo(1));
+      var maxGap = Duration.zero;
+      for (var i = 1; i < emits.length; i++) {
+        final gap = emits[i].time - emits[i - 1].time;
+        if (gap > maxGap) {
+          maxGap = gap;
+        }
+      }
+      expect(maxGap, lessThanOrEqualTo(vsync60Hz * 4));
+    });
+
+    testWidgets('skipping keeps a finite repetition count',
+        (WidgetTester tester) async {
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(10, const Duration(milliseconds: 12)),
+        repetitionCount: 2,
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: vsync60Hz,
+        appFrames: 60,
+      );
+
+      expect(codec.numFramesAsked, 30);
+      expect(emits.length, lessThan(30));
+      expect(
+        emits.where((e) => e.frame % 10 == 9).map((e) => e.frame ~/ 10),
+        <int>[0, 1, 2],
+      );
+      expect(emits.last.frame, 29);
+    });
+
+    testWidgets('skipping keeps codec swaps on the cycle boundary',
+        (WidgetTester tester) async {
+      final first = TimedCodec(
+        image20x10,
+        <Duration>[
+          ...List<Duration>.filled(9, const Duration(milliseconds: 12)),
+          const Duration(milliseconds: 100),
+        ],
+      );
+      final second = TimedCodec(
+        image200x100,
+        List<Duration>.filled(10, const Duration(milliseconds: 12)),
+      );
+      final codecStream = StreamController<Codec>();
+      final emits = <({int width, int frame})>[];
+      final imageStream = MultiImageStreamCompleter(
+        codec: codecStream.stream,
+        scale: 1.0,
+      );
+      final listener = ImageStreamListener((ImageInfo image, bool _) {
+        final width = image.image.width;
+        final codec = width == 20 ? first : second;
+        emits.add((width: width, frame: codec.numFramesAsked - 1));
+        image.dispose();
+      });
+      imageStream.addListener(listener);
+      codecStream.add(first);
+      await tester.idle();
+      for (var i = 0; i < 15; i++) {
+        await tester.pump(vsync60Hz);
+      }
+      codecStream.add(second);
+      for (var i = 0; i < 45; i++) {
+        await tester.pump(vsync60Hz);
+      }
+      imageStream.removeListener(listener);
+
+      final swap = emits.indexWhere((e) => e.width == 200);
+      expect(swap, greaterThan(0));
+      expect(emits.skip(swap).every((e) => e.width == 200), isTrue);
+      expect(emits[swap - 1].frame, 19);
+      expect(first.numFramesAsked, 20);
+      expect(swap, lessThan(first.numFramesAsked));
+    });
+
+    testWidgets('decode timing follows the scheduler time dilation',
+        (WidgetTester tester) async {
+      scheduler.timeDilation = 3;
+      addTearDown(() => scheduler.timeDilation = 1);
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 12)),
+        decodeDelay: const Duration(milliseconds: 10),
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: const Duration(milliseconds: 50),
+        appFrames: 200,
+      );
+      scheduler.timeDilation = 1;
+
+      // 10s at 3x is 3.33s of frame time: 278 frames, one per app frame.
+      expect(emits.length, closeTo(200, 2));
+      expect(codec.numFramesAsked - emits.length, closeTo(78, 3));
+    });
+  });
 }

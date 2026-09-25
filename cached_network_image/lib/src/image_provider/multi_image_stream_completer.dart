@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui show Codec, FrameInfo;
 
 import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
@@ -10,7 +11,7 @@ import 'package:flutter/scheduler.dart';
 double get timeDilation => _timeDilation;
 double _timeDilation = 1;
 
-const _maxCatchUpFrames = 4;
+const _maxSkippedFramesPerDecodeChain = 4;
 
 // Lag beyond one frame plus this restarts the timeline instead of bursting.
 const _resyncThreshold = Duration(milliseconds: 100);
@@ -96,6 +97,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   Timer? _timer;
 
   Duration? _lastAppFrameTimestamp;
+  DateTime? _lastAppFrameClock;
   StreamSubscription<ImageChunkEvent>? _chunkSubscription;
 
   // Used to guard against registering multiple _handleAppFrame callbacks for the same frame.
@@ -163,13 +165,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
       // start a decode, whose prologue would otherwise release the frame still
       // being read here.
       _nextFrame = null;
-      final frameDuration = clampGifFrameDuration(
-        nextFrame.duration,
-        minimumGifFrameDuration: minimumGifFrameDuration,
-      );
+      final frameDuration = _clampedDuration(nextFrame);
       _shownTimestamp = _nextShownTimestamp(timestamp, frameDuration);
       _frameDuration = frameDuration;
       _lastAppFrameTimestamp = timestamp;
+      _lastAppFrameClock = clock.now();
       _emitFrame(ImageInfo(image: nextFrame.image.clone(), scale: _scale));
       nextFrame.image.dispose();
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
@@ -215,28 +215,43 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
   // The last frame of a cycle is never skipped, as cycle ends drive codec
   // swaps and repetition limits.
-  bool _shouldSkipFrame(ui.FrameInfo frame, ui.Codec codec, int skipped) {
+  bool _shouldSkipFrame(
+    ui.Codec codec,
+    Duration duration,
+    Duration decodeDuration,
+  ) {
     final lastAppFrame = _lastAppFrameTimestamp;
+    final lastAppFrameClock = _lastAppFrameClock;
     final shownTimestamp = _shownTimestamp;
     final frameDuration = _frameDuration;
     if (!animate ||
         !hasListeners ||
-        skipped >= _maxCatchUpFrames ||
         _framesEmitted == 0 ||
         (_framesEmitted + 1) % codec.frameCount == 0 ||
         lastAppFrame == null ||
+        lastAppFrameClock == null ||
         shownTimestamp == null ||
         frameDuration == null) {
       return false;
     }
-    final nextDuration = clampGifFrameDuration(
-      frame.duration,
-      minimumGifFrameDuration: minimumGifFrameDuration,
-    );
-    return lastAppFrame >= shownTimestamp + frameDuration + nextDuration;
+    // A skipped frame still costs a decode, so skipping only catches up when
+    // decoding is faster than playback.
+    if (decodeDuration >= duration) {
+      return false;
+    }
+    final now = lastAppFrame + _frameTimeSince(lastAppFrameClock);
+    return now >= shownTimestamp + frameDuration + duration;
   }
 
-  Future<void> _decodeNextFrameAndSchedule([int skipped = 0]) async {
+  Duration _frameTimeSince(DateTime start) =>
+      clock.now().difference(start) * (1 / timeDilation);
+
+  Duration _clampedDuration(ui.FrameInfo frame) => clampGifFrameDuration(
+        frame.duration,
+        minimumGifFrameDuration: minimumGifFrameDuration,
+      );
+
+  Future<void> _decodeNextFrameAndSchedule() async {
     if (!animate && _framesEmitted > 0) {
       // Paused: the current codec has shown its first frame and nothing more
       // should be decoded from it, including when a listener is re-added.
@@ -253,47 +268,48 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // must be disposed of.
     _nextFrame?.image.dispose();
     _nextFrame = null;
-    ui.FrameInfo? frame;
-    _decodingCodecs.add(codec);
-    try {
-      frame = await codec.getNextFrame();
-    } on Object catch (exception, stack) {
-      reportError(
-        context: ErrorDescription('resolving an image frame'),
-        exception: exception,
-        stack: stack,
-        informationCollector: _informationCollector,
-        silent: true,
-      );
-    } finally {
-      _decodingCodecs.remove(codec);
-    }
+    for (var skipped = 0;; skipped++) {
+      final decodeStart = clock.now();
+      ui.FrameInfo? frame;
+      _decodingCodecs.add(codec);
+      try {
+        frame = await codec.getNextFrame();
+      } on Object catch (exception, stack) {
+        reportError(
+          context: ErrorDescription('resolving an image frame'),
+          exception: exception,
+          stack: stack,
+          informationCollector: _informationCollector,
+          silent: true,
+        );
+      } finally {
+        _decodingCodecs.remove(codec);
+      }
 
-    if (_codec != codec) {
-      // A newer codec was installed while this frame was decoding. The frame
-      // belongs to the old codec and must not be emitted under the new one,
-      // and this decode was the outgoing codec's last user, so it performs the
-      // disposal that `_handleCodecReady` deferred.
-      frame?.image.dispose();
-      codec.dispose();
-      return;
-    }
-    if (frame == null) {
-      // The decode failed and was already reported.
-      return;
-    }
-    if (_shouldSkipFrame(frame, codec, skipped)) {
+      if (_codec != codec) {
+        // A newer codec was installed while this frame was decoding. The frame
+        // belongs to the old codec and must not be emitted under the new one,
+        // and this decode was the outgoing codec's last user, so it performs
+        // the disposal that `_handleCodecReady` deferred.
+        frame?.image.dispose();
+        codec.dispose();
+        return;
+      }
+      if (frame == null) {
+        // The decode failed and was already reported.
+        return;
+      }
+      final duration = _clampedDuration(frame);
+      if (skipped == _maxSkippedFramesPerDecodeChain ||
+          !_shouldSkipFrame(codec, duration, _frameTimeSince(decodeStart))) {
+        _nextFrame = frame;
+        break;
+      }
       frame.image.dispose();
       _shownTimestamp = _shownTimestamp! + _frameDuration!;
-      _frameDuration = clampGifFrameDuration(
-        frame.duration,
-        minimumGifFrameDuration: minimumGifFrameDuration,
-      );
+      _frameDuration = duration;
       _framesEmitted += 1;
-      await _decodeNextFrameAndSchedule(skipped + 1);
-      return;
     }
-    _nextFrame = frame;
 
     if (codec.frameCount == 1) {
       // ImageStreamCompleter listeners removed while waiting for next frame to

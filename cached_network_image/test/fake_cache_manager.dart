@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:file/file.dart' show File;
@@ -278,4 +279,56 @@ class EvictBeforeReadManager extends CacheManager with ImageCacheManager {
 
   @override
   Future<void> dispose() => _inner.dispose();
+}
+
+/// Decodes each frame after [decodeDelay], cycling through [durations].
+class TimedCodec implements ui.Codec {
+  TimedCodec(
+    this._image,
+    this.durations, {
+    this.decodeDelay = Duration.zero,
+    this.repetitionCount = -1,
+  });
+
+  final ui.Image _image;
+  final List<Duration> durations;
+  final Duration decodeDelay;
+
+  final List<ui.Image> decodedImages = <ui.Image>[];
+
+  int numFramesAsked = 0;
+
+  @override
+  int get frameCount => durations.length;
+
+  @override
+  final int repetitionCount;
+
+  @override
+  Future<ui.FrameInfo> getNextFrame() {
+    final image = _image.clone();
+    decodedImages.add(image);
+    final frame = _TimedFrameInfo(
+      durations[numFramesAsked % durations.length],
+      image,
+    );
+    numFramesAsked += 1;
+    if (decodeDelay == Duration.zero) {
+      return Future<ui.FrameInfo>.value(frame);
+    }
+    return Future<ui.FrameInfo>.delayed(decodeDelay, () => frame);
+  }
+
+  @override
+  void dispose() {}
+}
+
+class _TimedFrameInfo implements ui.FrameInfo {
+  _TimedFrameInfo(this.duration, this.image);
+
+  @override
+  final Duration duration;
+
+  @override
+  final ui.Image image;
 }

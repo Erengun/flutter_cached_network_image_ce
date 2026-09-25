@@ -1,6 +1,6 @@
 ## [Unreleased]
 
-* **Fix:** Animated images played slower than their frame durations, e.g. 20ms GIF frames at 60% speed on a 60Hz display, because `MultiImageStreamCompleter` rounded every frame up to the next vsync. Frames now follow their durations on the wall-clock timeline, skipping frames that are already late ([flutter/flutter#24804](https://github.com/flutter/flutter/issues/24804)).
+* **Fix:** Animated images played slower than their frame durations, e.g. 20ms GIF frames at 60% speed on a 60Hz display, because `MultiImageStreamCompleter` rounded every frame up to the next vsync. Frames now follow their durations on the wall-clock timeline, skipping frames that are already late when decoding is fast enough to catch up ([flutter/flutter#24804](https://github.com/flutter/flutter/issues/24804)).
 
 ## [4.12.0] - 2026-09-08
 

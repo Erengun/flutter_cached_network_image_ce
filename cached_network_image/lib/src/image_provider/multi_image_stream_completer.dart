@@ -13,7 +13,6 @@ double _timeDilation = 1;
 
 const _maxSkippedFramesPerDecodeChain = 4;
 
-// Lag beyond one frame plus this restarts the timeline instead of bursting.
 const _resyncThreshold = Duration(milliseconds: 100);
 
 /// An ImageStreamCompleter with support for loading multiple images.
@@ -86,13 +85,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
   ui.FrameInfo? _nextFrame;
 
-  // When the current frame started on the animation's ideal timeline.
+  // When the current was first shown.
   Duration? _shownTimestamp;
 
   // The requested duration for the current frame;
   Duration? _frameDuration;
 
-  // How many frames have been emitted or skipped so far.
+  // How many frames have been emitted so far.
   int _framesEmitted = 0;
   Timer? _timer;
 
@@ -213,8 +212,6 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     return deadline;
   }
 
-  // The last frame of a cycle is never skipped, as cycle ends drive codec
-  // swaps and repetition limits.
   bool _shouldSkipFrame(
     ui.Codec codec,
     Duration duration,
@@ -234,8 +231,6 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
         frameDuration == null) {
       return false;
     }
-    // A skipped frame still costs a decode, so skipping only catches up when
-    // decoding is faster than playback.
     if (decodeDuration >= duration) {
       return false;
     }

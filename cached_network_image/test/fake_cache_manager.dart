@@ -281,7 +281,6 @@ class EvictBeforeReadManager extends CacheManager with ImageCacheManager {
   Future<void> dispose() => _inner.dispose();
 }
 
-/// Decodes each frame after [decodeDelay], cycling through [durations].
 class TimedCodec implements ui.Codec {
   TimedCodec(
     this._image,

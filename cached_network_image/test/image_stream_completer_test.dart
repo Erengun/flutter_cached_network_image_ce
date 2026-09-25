@@ -1660,7 +1660,6 @@ void main() {
         vsync: vsync60Hz,
         appFrames: 600,
       );
-      // 600 app frames of 16.667ms are 10s, which is 500 frames of 20ms.
       expect(emits.length, closeTo(500, 2));
     });
 
@@ -1707,7 +1706,6 @@ void main() {
       }
       imageStream.removeListener(listener);
 
-      // 1s at 20ms is 50 frames, all decoded ones shown.
       expect(emitted - emittedAfterStall, closeTo(50, 2));
       expect(
           codec.numFramesAsked - askedAfterStall, emitted - emittedAfterStall);
@@ -1726,7 +1724,6 @@ void main() {
         appFrames: 600,
       );
 
-      // 10s of 12ms frames is 833 frames, and 600 app frames show 600 of them.
       expect(codec.numFramesAsked - emits.length, closeTo(233, 10));
       final pendingFrame = codec.decodedImages.last;
       expect(
@@ -1751,7 +1748,6 @@ void main() {
         appFrames: 300,
       );
 
-      // 5s of 50ms decodes is 100 frames, one every third app frame.
       expect(emits.length, closeTo(100, 2));
       expect(codec.numFramesAsked - emits.length, lessThanOrEqualTo(1));
       var maxGap = Duration.zero;
@@ -1778,7 +1774,6 @@ void main() {
         appFrames: 60,
       );
 
-      // A repetition count of 2 plays the 10 frames 3 times.
       expect(codec.numFramesAsked, 30);
       expect(emits.length, lessThan(30));
       expect(
@@ -1790,8 +1785,6 @@ void main() {
 
     testWidgets('skipping keeps codec swaps on the cycle boundary',
         (WidgetTester tester) async {
-      // The long last frame arms the timer that buffers a new codec until the
-      // cycle ends.
       final first = TimedCodec(
         image20x10,
         <Duration>[
@@ -1818,7 +1811,6 @@ void main() {
       imageStream.addListener(listener);
       codecStream.add(first);
       await tester.idle();
-      // 15 app frames (250ms) land inside the first codec's second 208ms cycle.
       for (var i = 0; i < 15; i++) {
         await tester.pump(vsync60Hz);
       }

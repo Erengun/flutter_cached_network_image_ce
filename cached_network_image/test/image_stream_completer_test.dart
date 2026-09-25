@@ -9,6 +9,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
+import 'package:flutter/scheduler.dart' as scheduler show timeDilation;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_cache_manager.dart';
@@ -1826,6 +1827,28 @@ void main() {
       expect(emits[swap - 1].frame, 19);
       expect(first.numFramesAsked, 20);
       expect(swap, lessThan(first.numFramesAsked));
+    });
+
+    testWidgets('decode timing follows the scheduler time dilation',
+        (WidgetTester tester) async {
+      scheduler.timeDilation = 3;
+      addTearDown(() => scheduler.timeDilation = 1);
+      final codec = TimedCodec(
+        image20x10,
+        List<Duration>.filled(28, const Duration(milliseconds: 12)),
+        decodeDelay: const Duration(milliseconds: 10),
+      );
+      final emits = await recordEmits(
+        tester,
+        codec,
+        vsync: const Duration(milliseconds: 50),
+        appFrames: 200,
+      );
+      scheduler.timeDilation = 1;
+
+      // 10s at 3x is 3.33s of frame time: 278 frames, one per app frame.
+      expect(emits.length, closeTo(200, 2));
+      expect(codec.numFramesAsked - emits.length, closeTo(78, 3));
     });
   });
 }

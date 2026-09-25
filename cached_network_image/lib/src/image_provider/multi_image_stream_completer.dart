@@ -6,6 +6,7 @@ import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/scheduler.dart' as scheduler show timeDilation;
 
 /// Slows down animations by this factor to help in development.
 double get timeDilation => _timeDilation;
@@ -239,7 +240,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   }
 
   Duration _frameTimeSince(DateTime start) =>
-      clock.now().difference(start) * (1 / timeDilation);
+      clock.now().difference(start) * (1 / scheduler.timeDilation);
 
   Duration _clampedDuration(ui.FrameInfo frame) => clampGifFrameDuration(
         frame.duration,

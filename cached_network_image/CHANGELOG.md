@@ -1,3 +1,7 @@
+## [4.13.1] - 2026-09-26
+
+* **Fix:** Animated images played slower than their frame durations, e.g. 20ms GIF frames at 60% speed on a 60Hz display, because `MultiImageStreamCompleter` rounded every frame up to the next vsync. Frames now follow their durations on the wall-clock timeline, skipping frames that are already late when decoding is fast enough to catch up ([flutter/flutter#24804](https://github.com/flutter/flutter/issues/24804)).
+
 ## [4.13.0] - 2026-09-26
 
 * **Feature:** `maxWidthDiskCache` / `maxHeightDiskCache` now resize WebP images on disk. Before, WebP files were stored at full size. As with JPEG and PNG, this applies when the URL path ends in `.webp`. Requested in issue #78.

@@ -2,13 +2,19 @@ import 'dart:async';
 import 'dart:ui' as ui show Codec, FrameInfo;
 
 import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/scheduler.dart' as scheduler show timeDilation;
 
 /// Slows down animations by this factor to help in development.
 double get timeDilation => _timeDilation;
 double _timeDilation = 1;
+
+const _maxSkippedFramesPerDecodeChain = 4;
+
+const _resyncThreshold = Duration(milliseconds: 100);
 
 /// An ImageStreamCompleter with support for loading multiple images.
 class MultiImageStreamCompleter extends ImageStreamCompleter {
@@ -89,6 +95,9 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
   // How many frames have been emitted so far.
   int _framesEmitted = 0;
   Timer? _timer;
+
+  Duration? _lastAppFrameTimestamp;
+  DateTime? _lastAppFrameClock;
   StreamSubscription<ImageChunkEvent>? _chunkSubscription;
 
   // Used to guard against registering multiple _handleAppFrame callbacks for the same frame.
@@ -156,11 +165,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
       // start a decode, whose prologue would otherwise release the frame still
       // being read here.
       _nextFrame = null;
-      _shownTimestamp = timestamp;
-      _frameDuration = clampGifFrameDuration(
-        nextFrame.duration,
-        minimumGifFrameDuration: minimumGifFrameDuration,
-      );
+      final frameDuration = _clampedDuration(nextFrame);
+      _shownTimestamp = _nextShownTimestamp(timestamp, frameDuration);
+      _frameDuration = frameDuration;
+      _lastAppFrameTimestamp = timestamp;
+      _lastAppFrameClock = clock.now();
       _emitFrame(ImageInfo(image: nextFrame.image.clone(), scale: _scale));
       nextFrame.image.dispose();
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
@@ -186,6 +195,58 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     return timestamp - _shownTimestamp! >= _frameDuration!;
   }
 
+  // Anchoring to the app frame rounds every frame up to a vsync and slows
+  // playback (https://github.com/flutter/flutter/issues/24804).
+  Duration _nextShownTimestamp(Duration timestamp, Duration frameDuration) {
+    final shownTimestamp = _shownTimestamp;
+    final previousDuration = _frameDuration;
+    if (_framesEmitted == 0 ||
+        _lastAppFrameTimestamp == null ||
+        shownTimestamp == null ||
+        previousDuration == null) {
+      return timestamp;
+    }
+    final deadline = shownTimestamp + previousDuration;
+    if (timestamp - deadline > frameDuration + _resyncThreshold) {
+      return timestamp;
+    }
+    return deadline;
+  }
+
+  bool _shouldSkipFrame(
+    ui.Codec codec,
+    Duration duration,
+    Duration decodeDuration,
+  ) {
+    final lastAppFrame = _lastAppFrameTimestamp;
+    final lastAppFrameClock = _lastAppFrameClock;
+    final shownTimestamp = _shownTimestamp;
+    final frameDuration = _frameDuration;
+    if (!animate ||
+        !hasListeners ||
+        _framesEmitted == 0 ||
+        (_framesEmitted + 1) % codec.frameCount == 0 ||
+        lastAppFrame == null ||
+        lastAppFrameClock == null ||
+        shownTimestamp == null ||
+        frameDuration == null) {
+      return false;
+    }
+    if (decodeDuration >= duration) {
+      return false;
+    }
+    final now = lastAppFrame + _frameTimeSince(lastAppFrameClock);
+    return now >= shownTimestamp + frameDuration + duration;
+  }
+
+  Duration _frameTimeSince(DateTime start) =>
+      clock.now().difference(start) * (1 / scheduler.timeDilation);
+
+  Duration _clampedDuration(ui.FrameInfo frame) => clampGifFrameDuration(
+        frame.duration,
+        minimumGifFrameDuration: minimumGifFrameDuration,
+      );
+
   Future<void> _decodeNextFrameAndSchedule() async {
     if (!animate && _framesEmitted > 0) {
       // Paused: the current codec has shown its first frame and nothing more
@@ -203,36 +264,48 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // must be disposed of.
     _nextFrame?.image.dispose();
     _nextFrame = null;
-    ui.FrameInfo? frame;
-    _decodingCodecs.add(codec);
-    try {
-      frame = await codec.getNextFrame();
-    } on Object catch (exception, stack) {
-      reportError(
-        context: ErrorDescription('resolving an image frame'),
-        exception: exception,
-        stack: stack,
-        informationCollector: _informationCollector,
-        silent: true,
-      );
-    } finally {
-      _decodingCodecs.remove(codec);
-    }
+    for (var skipped = 0;; skipped++) {
+      final decodeStart = clock.now();
+      ui.FrameInfo? frame;
+      _decodingCodecs.add(codec);
+      try {
+        frame = await codec.getNextFrame();
+      } on Object catch (exception, stack) {
+        reportError(
+          context: ErrorDescription('resolving an image frame'),
+          exception: exception,
+          stack: stack,
+          informationCollector: _informationCollector,
+          silent: true,
+        );
+      } finally {
+        _decodingCodecs.remove(codec);
+      }
 
-    if (_codec != codec) {
-      // A newer codec was installed while this frame was decoding. The frame
-      // belongs to the old codec and must not be emitted under the new one,
-      // and this decode was the outgoing codec's last user, so it performs the
-      // disposal that `_handleCodecReady` deferred.
-      frame?.image.dispose();
-      codec.dispose();
-      return;
+      if (_codec != codec) {
+        // A newer codec was installed while this frame was decoding. The frame
+        // belongs to the old codec and must not be emitted under the new one,
+        // and this decode was the outgoing codec's last user, so it performs
+        // the disposal that `_handleCodecReady` deferred.
+        frame?.image.dispose();
+        codec.dispose();
+        return;
+      }
+      if (frame == null) {
+        // The decode failed and was already reported.
+        return;
+      }
+      final duration = _clampedDuration(frame);
+      if (skipped == _maxSkippedFramesPerDecodeChain ||
+          !_shouldSkipFrame(codec, duration, _frameTimeSince(decodeStart))) {
+        _nextFrame = frame;
+        break;
+      }
+      frame.image.dispose();
+      _shownTimestamp = _shownTimestamp! + _frameDuration!;
+      _frameDuration = duration;
+      _framesEmitted += 1;
     }
-    if (frame == null) {
-      // The decode failed and was already reported.
-      return;
-    }
-    _nextFrame = frame;
 
     if (codec.frameCount == 1) {
       // ImageStreamCompleter listeners removed while waiting for next frame to
@@ -297,6 +370,7 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     if (!hasListeners) {
       _timer?.cancel();
       _timer = null;
+      _lastAppFrameTimestamp = null;
       __maybeDispose();
     }
   }

@@ -1,3 +1,7 @@
+## [4.13.2] - 2026-09-26
+
+* **Fix:** `PathNotFoundException` crash on cold start when the OS cleared the cache directory (e.g. Android low-storage eviction) while Hive was opening the box's `.hive`/`.lock` files during `DefaultCacheManager` initialization. Initialization now retries opening the box once, which recreates the directory (issue #77).
+
 ## [4.13.1] - 2026-09-26
 
 * **Fix:** Animated images played slower than their frame durations, e.g. 20ms GIF frames at 60% speed on a 60Hz display, because `MultiImageStreamCompleter` rounded every frame up to the next vsync. Frames now follow their durations on the wall-clock timeline, skipping frames that are already late when decoding is fast enough to catch up ([flutter/flutter#24804](https://github.com/flutter/flutter/issues/24804)).

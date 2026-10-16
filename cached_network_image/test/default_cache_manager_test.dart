@@ -8,6 +8,8 @@ import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart'
     as io_loader;
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:file/file.dart' as fs;
+import 'package:file/local.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show ImageChunkEvent;
 import 'package:flutter_test/flutter_test.dart';
@@ -27,6 +29,36 @@ import 'support/http_clients.dart';
 class _CorruptPayload {
   _CorruptPayload(this.data);
   final String data;
+}
+
+/// Runs [onOpen] right before opening the delegate file.
+class _BeforeOpenFile extends fs.ForwardingFileSystemEntity<fs.File, io.File>
+    with fs.ForwardingFile {
+  _BeforeOpenFile(this.delegate, this.onOpen);
+
+  @override
+  final io.File delegate;
+
+  final void Function() onOpen;
+
+  @override
+  fs.FileSystem get fileSystem => const LocalFileSystem();
+
+  @override
+  fs.Directory wrapDirectory(io.Directory delegate) =>
+      fileSystem.directory(delegate.path);
+
+  @override
+  fs.File wrapFile(io.File delegate) => fileSystem.file(delegate.path);
+
+  @override
+  fs.Link wrapLink(io.Link delegate) => fileSystem.link(delegate.path);
+
+  @override
+  Future<io.RandomAccessFile> open({io.FileMode mode = io.FileMode.read}) {
+    onOpen();
+    return delegate.open(mode: mode);
+  }
 }
 
 /// Adapter with typeId 121 — the exact id reported in issue #12.
@@ -1197,6 +1229,107 @@ void main() {
 
       await manager2.emptyCache();
       await manager2.dispose();
+    });
+  });
+
+  // ---- Issue #77: cache directory evicted during init ----
+  //
+  // Android can clear the app cache directory while Hive opens the box, so
+  // opening the .lock file throws PathNotFoundException. The override below
+  // deletes the directory at that exact moment: right before Hive opens the
+  // lock file, after the .hive file is already open.
+
+  group('Regression: cache directory evicted during init (#77)', () {
+    io.File Function(String) evictOnFirstLockFile(io.Directory baseDir) {
+      var evicted = false;
+      return (String p) {
+        // Build the real File outside the override zone to avoid recursion.
+        final file = Zone.root.run(() => io.File(p));
+        if (evicted || !p.endsWith('cached_network_image_cache.lock')) {
+          return file;
+        }
+        return _BeforeOpenFile(file, () {
+          if (evicted) return;
+          evicted = true;
+          io.Directory('${baseDir.path}/cached_network_image_ce')
+              .deleteSync(recursive: true);
+        });
+      };
+    }
+
+    test('recreates the hive directory and opens the box', () async {
+      final customDir = io.Directory.systemTemp.createTempSync('evicted_');
+      addTearDown(() {
+        try {
+          customDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+
+      await io.IOOverrides.runZoned(
+        () => manager.putFile(
+          'https://example.com/evicted.bin',
+          [1, 2, 3],
+          fileExtension: 'bin',
+        ),
+        createFile: evictOnFirstLockFile(customDir),
+      );
+
+      final cached = await manager.getFileFromCache(
+        'https://example.com/evicted.bin',
+      );
+      expect(cached, isNotNull);
+      expect(
+        io.File(
+          '${customDir.path}/cached_network_image_ce/hive/'
+          'cached_network_image_cache.hive',
+        ).existsSync(),
+        isTrue,
+      );
+
+      await manager.emptyCache();
+      await manager.dispose();
+    });
+
+    test('concurrent callers all succeed after recovery', () async {
+      final customDir =
+          io.Directory.systemTemp.createTempSync('evicted_concurrent_');
+      addTearDown(() {
+        try {
+          customDir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+
+      await io.IOOverrides.runZoned(
+        () => Future.wait(
+          List.generate(
+            10,
+            (i) => manager.putFile(
+              'https://example.com/evicted-$i.bin',
+              [i],
+              fileExtension: 'bin',
+            ),
+          ),
+        ),
+        createFile: evictOnFirstLockFile(customDir),
+      );
+
+      for (var i = 0; i < 10; i++) {
+        final cached = await manager.getFileFromCache(
+          'https://example.com/evicted-$i.bin',
+        );
+        expect(cached, isNotNull, reason: 'Entry $i should exist');
+      }
+
+      await manager.emptyCache();
+      await manager.dispose();
     });
   });
 

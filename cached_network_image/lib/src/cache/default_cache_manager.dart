@@ -213,6 +213,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       // Also remove cached files since their metadata is gone.
       await _deleteCacheFiles();
+    } on io.PathNotFoundException catch (e) {
+      // The OS cleared the cache directory (e.g. Android low-storage
+      // eviction) while Hive was opening the box files. Hive recreates a
+      // missing box directory on open, so retry once.
+      cacheLogger.log(
+        'CacheManager: Cache directory removed during init, retrying: $e',
+        CacheManagerLogLevel.warning,
+      );
+      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
     }
 
     // Run cleanup in background, but keep a handle so dispose() can wait

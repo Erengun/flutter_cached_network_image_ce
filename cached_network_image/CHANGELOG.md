@@ -1,3 +1,8 @@
+## Unreleased
+
+* **Feature:** `DefaultCacheManager` now supports access-based retention with `maxIdleDuration`, deferred destructive cleanup with `cleanupOnInitialize: false`, and an idempotent `startCleanup()` gate. Once cleanup is enabled, stores above `maxNrOfCacheObjects` schedule a coalesced background sweep. Existing expiry-based cleanup remains the default.
+* **Feature:** The web cache manager now records access timestamps and supports the same cleanup strategy, idle-retention, and deferred-cleanup API as native platforms.
+
 ## [4.13.2] - 2026-09-26
 
 * **Fix:** `PathNotFoundException` crash on cold start when the OS cleared the cache directory (e.g. Android low-storage eviction) while Hive was opening the box's `.hive`/`.lock` files during `DefaultCacheManager` initialization. Initialization now retries opening the box once, which recreates the directory (issue #77).

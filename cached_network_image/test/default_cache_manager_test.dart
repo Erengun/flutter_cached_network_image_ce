@@ -8,6 +8,7 @@ import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart'
     as io_loader;
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:clock/clock.dart';
 import 'package:file/file.dart' as fs;
 import 'package:file/local.dart';
 import 'package:flutter/services.dart';
@@ -2054,6 +2055,7 @@ void main() {
       final manager = DefaultCacheManager(
         maxNrOfCacheObjects: 2,
         cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
       );
       addTearDown(() async {
         try {
@@ -2061,19 +2063,26 @@ void main() {
         } on Object catch (_) {}
       });
 
-      // TtlCleanupStrategy evicts the earliest validTill first, so 'soonest'
-      // is the natural victim.
-      await manager.putFile('https://example.com/a.png', [1],
-          key: 'soonest', maxAge: const Duration(hours: 1));
-      await manager.putFile('https://example.com/b.png', [2],
-          key: 'middle', maxAge: const Duration(hours: 2));
-      await manager.putFile('https://example.com/c.png', [3],
-          key: 'latest', maxAge: const Duration(hours: 3));
+      final createdAt = DateTime.utc(2026, 1, 1);
+      await withClock(Clock.fixed(createdAt), () async {
+        // TtlCleanupStrategy evicts the earliest validTill first, so 'soonest'
+        // is the natural victim.
+        await manager.putFile('https://example.com/a.png', [1],
+            key: 'soonest', maxAge: const Duration(hours: 1));
+        await manager.putFile('https://example.com/b.png', [2],
+            key: 'middle', maxAge: const Duration(hours: 2));
+        await manager.putFile('https://example.com/c.png', [3],
+            key: 'latest', maxAge: const Duration(hours: 3));
+      });
 
-      // Serving it hands a file path to a caller that has not read it yet.
-      expect(await manager.getFileFromCache('soonest'), isNotNull);
-
-      await manager.debugRunCleanup();
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        () async {
+          // Serving it hands a file path to a caller that has not read it yet.
+          expect(await manager.getFileFromCache('soonest'), isNotNull);
+          await manager.debugRunCleanup();
+        },
+      );
 
       expect(await manager.getFileFromCache('soonest'), isNotNull,
           reason: 'an entry just handed out must not be evicted');
@@ -2115,7 +2124,7 @@ void main() {
       expect(manager.debugRecentlyServedCount, 0);
     });
 
-    test('still evicts down to maxNrOfCacheObjects when nothing was served',
+    test('evicts down to maxNrOfCacheObjects after putFile handoff expires',
         () async {
       final dir = io.Directory.systemTemp.createTempSync('evict_plain_');
       addTearDown(() {
@@ -2127,6 +2136,7 @@ void main() {
       final manager = DefaultCacheManager(
         maxNrOfCacheObjects: 2,
         cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
       );
       addTearDown(() async {
         try {
@@ -2134,14 +2144,20 @@ void main() {
         } on Object catch (_) {}
       });
 
-      await manager.putFile('https://example.com/a.png', [1],
-          key: 'soonest', maxAge: const Duration(hours: 1));
-      await manager.putFile('https://example.com/b.png', [2],
-          key: 'middle', maxAge: const Duration(hours: 2));
-      await manager.putFile('https://example.com/c.png', [3],
-          key: 'latest', maxAge: const Duration(hours: 3));
+      final createdAt = DateTime.utc(2026, 1, 1);
+      await withClock(Clock.fixed(createdAt), () async {
+        await manager.putFile('https://example.com/a.png', [1],
+            key: 'soonest', maxAge: const Duration(hours: 1));
+        await manager.putFile('https://example.com/b.png', [2],
+            key: 'middle', maxAge: const Duration(hours: 2));
+        await manager.putFile('https://example.com/c.png', [3],
+            key: 'latest', maxAge: const Duration(hours: 3));
+      });
 
-      await manager.debugRunCleanup();
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        manager.debugRunCleanup,
+      );
 
       expect(await manager.getFileFromCache('soonest'), isNull);
       expect(await manager.getFileFromCache('middle'), isNotNull);
@@ -2648,6 +2664,7 @@ void main() {
       // Step 1: Add 5 entries with comfortably-future expiry
       final manager1 = DefaultCacheManager(
         cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
         maxNrOfCacheObjects: 2,
         cleanupStrategy: const LruCleanupStrategy(),
       );
@@ -2718,6 +2735,7 @@ void main() {
       // 'ttl-c' and 'ttl-d' have the longest TTL and should survive.
       final manager1 = DefaultCacheManager(
         cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
         maxNrOfCacheObjects: 2,
         cleanupStrategy: const TtlCleanupStrategy(),
       );

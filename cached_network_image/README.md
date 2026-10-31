@@ -185,6 +185,31 @@ CachedNetworkImage(
 Note: Using `HttpGet` on Web disables the browser's default image caching
 mechanisms, so images are cached via the `cache_manager` instead.
 
+### Cache Size
+
+`getCacheSize()` returns the total size in bytes of the images the cache
+manager has stored, or `0` when the cache is empty. Flutter's in-memory
+`ImageCache` is not counted.
+
+Call it on the manager your images use. By default that is the shared
+`CachedNetworkImageProvider.defaultCacheManager`. Don't create a new
+`DefaultCacheManager()` just to read the size: it opens a second handle on the
+same cache files.
+
+```dart
+final manager = CachedNetworkImageProvider.defaultCacheManager;
+if (manager is DefaultCacheManager) {
+  final int sizeInBytes = await manager.getCacheSize();
+}
+```
+
+If you pass your own `cacheManager` to the widgets, call `getCacheSize()` on
+that instance instead.
+
+On Web, only images loaded with `ImageRenderMethodForWeb.HttpGet` go through
+the cache manager. Images shown with the default `HtmlImage` are cached by the
+browser and are not counted.
+
 ### HTTP Interceptors
 
 Intercept and modify HTTP requests, responses, and errors before they reach the cache layer.

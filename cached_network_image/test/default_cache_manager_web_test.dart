@@ -221,6 +221,35 @@ void main() {
         isNull,
       );
     });
+
+    test('getCacheSize sums cached bytes and drops on remove/empty', () async {
+      expect(await manager.getCacheSize(), 0);
+
+      const url1 = 'https://example.com/size-1.png';
+      const url2 = 'https://example.com/size-2.png';
+      await manager.putFile(url1, List.filled(10, 1), fileExtension: 'png');
+      await manager.putFile(url2, List.filled(32, 2), fileExtension: 'png');
+      expect(await manager.getCacheSize(), 42);
+
+      await manager.removeFile(url1);
+      expect(await manager.getCacheSize(), 32);
+
+      await manager.emptyCache();
+      expect(await manager.getCacheSize(), 0);
+    });
+
+    test('getCacheSize ignores malformed metadata entries', () async {
+      await manager.putFile(
+        'https://example.com/size-ok.png',
+        List.filled(32, 1),
+        fileExtension: 'png',
+      );
+      await testHive
+          .box<Map>('cached_network_image_cache')
+          .put('__malformed__', {'length': 'not-an-int'});
+
+      expect(await manager.getCacheSize(), 32);
+    });
   });
 
   // =====================================================================

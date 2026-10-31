@@ -413,6 +413,19 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _dataBox!.clear();
   }
 
+  /// Returns the total size in bytes of the images stored in IndexedDB.
+  ///
+  /// Counts only entries tracked by the cache, not Flutter's in-memory
+  /// [ImageCache]. Returns 0 when the cache is empty.
+  Future<int> getCacheSize() async {
+    await _ensureInitialized();
+    var total = 0;
+    for (final raw in _metaBox!.values) {
+      if (raw['length'] case final int length) total += length;
+    }
+    return total;
+  }
+
   @override
   Future<void> dispose() async {
     final inFlightInit = _initCompleter;

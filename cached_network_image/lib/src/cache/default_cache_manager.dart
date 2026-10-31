@@ -770,10 +770,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<int> getCacheSize() async {
     await _ensureInitialized();
     final cacheDir = _cacheDir!;
-    final relativePaths = {
-      for (final raw in _cacheBox!.values)
-        if (raw['relativePath'] case final String relativePath) relativePath,
-    };
+    final relativePaths = <String>{};
+    for (final raw in _cacheBox!.values) {
+      try {
+        relativePaths.add(CacheEntryMetadata.fromMap(raw).relativePath);
+      } on Object catch (_) {
+        // Malformed entry: never served from the cache, so not counted.
+      }
+    }
     var total = 0;
     for (final relativePath in relativePaths) {
       try {

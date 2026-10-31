@@ -1493,7 +1493,12 @@ void main() {
         'cached_network_image_cache',
         path: '${customDir.path}/cached_network_image_ce/hive',
       );
-      await rawBox.put('__malformed__', {'length': 7});
+      // Points at a real file but lacks the url/validTill that
+      // CacheEntryMetadata.fromMap requires.
+      io.File('${customDir.path}/cached_network_image_ce/malformed.bin')
+          .writeAsBytesSync(List.filled(7, 0));
+      await rawBox
+          .put('__malformed__', {'relativePath': 'malformed.bin', 'length': 7});
       await rawBox.close();
       await rawHive.close();
 

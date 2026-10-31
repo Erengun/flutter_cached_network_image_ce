@@ -203,8 +203,9 @@ if (manager is DefaultCacheManager) {
 }
 ```
 
-If you pass your own `cacheManager` to the widgets, call `getCacheSize()` on
-that instance instead.
+If you pass your own `DefaultCacheManager` instance to the widgets, call
+`getCacheSize()` on that instance instead. A custom `BaseCacheManager`
+implementation does not have `getCacheSize()`.
 
 On Web, only images loaded with `ImageRenderMethodForWeb.HttpGet` go through
 the cache manager. Images shown with the default `HtmlImage` are cached by the

@@ -244,9 +244,29 @@ void main() {
         List.filled(32, 1),
         fileExtension: 'png',
       );
-      await testHive
-          .box<Map>('cached_network_image_cache')
-          .put('__malformed__', {'length': 'not-an-int'});
+      final metaBox = testHive.box<Map>('cached_network_image_cache');
+      await metaBox.put('__bad_length__', {'length': 'not-an-int'});
+      // Has a length but lacks the url that CacheEntryMetadata.fromMap needs.
+      await metaBox.put('__no_url__', {'length': 5});
+
+      expect(await manager.getCacheSize(), 32);
+    });
+
+    test('getCacheSize skips metadata whose bytes were never stored', () async {
+      await manager.putFile(
+        'https://example.com/size-ok.png',
+        List.filled(32, 1),
+        fileExtension: 'png',
+      );
+      await testHive.box<Map>('cached_network_image_cache').put(
+            'https://example.com/no-bytes.png',
+            CacheEntryMetadata(
+              url: 'https://example.com/no-bytes.png',
+              relativePath: 'no-bytes.png',
+              validTill: DateTime.now().add(const Duration(days: 1)),
+              length: 10,
+            ).toMap(),
+          );
 
       expect(await manager.getCacheSize(), 32);
     });

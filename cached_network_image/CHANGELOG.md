@@ -1,3 +1,7 @@
+## [4.14.0] - 2026-10-31
+
+* **Feature:** Added `DefaultCacheManager.getCacheSize()`, which returns the total size in bytes of the images stored in the cache, or `0` when the cache is empty. Flutter's in-memory `ImageCache` is not counted. On IO the sizes are read from the files on disk, so files the OS has already removed are not counted. On Web it counts only images cached through the cache manager (`ImageRenderMethodForWeb.HttpGet`). Requested in issue #83.
+
 ## [4.13.2] - 2026-09-26
 
 * **Fix:** `PathNotFoundException` crash on cold start when the OS cleared the cache directory (e.g. Android low-storage eviction) while Hive was opening the box's `.hive`/`.lock` files during `DefaultCacheManager` initialization. Initialization now retries opening the box once, which recreates the directory (issue #77).

@@ -1446,6 +1446,70 @@ void main() {
       expect(await manager.getFileFromCache(url2), isNull);
     });
 
+    test('getCacheSize sums cached bytes and drops on remove/empty', () async {
+      await manager.emptyCache();
+      expect(await manager.getCacheSize(), 0);
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final url1 = 'https://example.com/size1-$now.bin';
+      final url2 = 'https://example.com/size2-${now + 1}.bin';
+      await manager.putFile(url1, List.filled(10, 1), fileExtension: 'bin');
+      await manager.putFile(url2, List.filled(32, 2), fileExtension: 'bin');
+      expect(await manager.getCacheSize(), 42);
+
+      await manager.removeFile(url1);
+      expect(await manager.getCacheSize(), 32);
+
+      await manager.emptyCache();
+      expect(await manager.getCacheSize(), 0);
+    });
+
+    test('getCacheSize skips entries whose file is gone from disk', () async {
+      await manager.emptyCache();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final gone = await manager.putFile(
+          'https://example.com/size-gone-$now.bin', List.filled(10, 1),
+          fileExtension: 'bin');
+      await manager.putFile(
+          'https://example.com/size-kept-${now + 1}.bin', List.filled(32, 2),
+          fileExtension: 'bin');
+
+      await (gone as io.File).delete();
+
+      expect(await manager.getCacheSize(), 32);
+    });
+
+    test('getCacheSize ignores malformed metadata entries', () async {
+      final customDir = testTempDir.createTempSync('size_malformed_');
+      final first = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+      await first.putFile('https://example.com/size-ok.bin', List.filled(32, 1),
+          fileExtension: 'bin');
+      await first.dispose();
+
+      final rawHive = HiveImpl();
+      final rawBox = await rawHive.openBox<Map>(
+        'cached_network_image_cache',
+        path: '${customDir.path}/cached_network_image_ce/hive',
+      );
+      // Points at a real file but lacks the url/validTill that
+      // CacheEntryMetadata.fromMap requires.
+      io.File('${customDir.path}/cached_network_image_ce/malformed.bin')
+          .writeAsBytesSync(List.filled(7, 0));
+      await rawBox
+          .put('__malformed__', {'relativePath': 'malformed.bin', 'length': 7});
+      await rawBox.close();
+      await rawHive.close();
+
+      final second = DefaultCacheManager(
+        cacheDirectoryProvider: () async => customDir,
+      );
+      addTearDown(second.dispose);
+
+      expect(await second.getCacheSize(), 32);
+    });
+
     test('dispose and re-initialize', () async {
       final url =
           'https://example.com/dispose-test-${DateTime.now().millisecondsSinceEpoch}.bin';

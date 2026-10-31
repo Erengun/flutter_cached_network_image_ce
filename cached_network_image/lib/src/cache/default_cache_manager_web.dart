@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file/file.dart';
 import 'package:file/memory.dart';
@@ -12,6 +13,7 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 
 import 'cache_entry_metadata.dart';
+import 'cleanup_strategy.dart';
 import 'shared_http_client.dart';
 
 export 'cache_entry_metadata.dart';
@@ -21,6 +23,8 @@ const _kDataBoxName = 'cached_network_image_data';
 const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
+const _kServedEntryGracePeriod = Duration(seconds: 30);
+const _kServedEntryPruneThreshold = 64;
 
 /// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
 String _sanitizeBoxKey(String key) {
@@ -40,23 +44,39 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ///
   /// [stalePeriod] controls how long a cached entry remains valid.
   /// [maxNrOfCacheObjects] caps the number of entries before cleanup.
+  /// [maxIdleDuration] removes entries that have not been accessed for that
+  /// duration instead of removing entries based on expiry.
+  /// [cleanupOnInitialize] can defer cleanup until [startCleanup] is called.
   /// [httpClientFactory] allows injecting a custom HTTP client for testing.
   /// [hiveInstance] allows injecting a pre-initialised Hive instance
   /// (useful for VM tests that need `Hive.init(path)` called first).
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
+    this.maxIdleDuration,
+    this.cleanupOnInitialize = true,
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
     @visibleForTesting HiveInterface? hiveInstance,
+    CleanupStrategy? cleanupStrategy,
   })  : _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
-        _hive = hiveInstance ?? HiveImpl();
+        _hive = hiveInstance ?? HiveImpl(),
+        _cleanupEnabled = cleanupOnInitialize,
+        _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
 
   /// Maximum number of objects in the cache before cleanup.
   final int maxNrOfCacheObjects;
+
+  /// Maximum time an entry may remain unaccessed before cleanup removes it.
+  ///
+  /// When null, cleanup keeps the legacy expiry-based behavior.
+  final Duration? maxIdleDuration;
+
+  /// Whether cleanup is enabled during initialization.
+  final bool cleanupOnInitialize;
 
   /// Optional connection parameters for HTTP timeouts.
   ///
@@ -77,11 +97,20 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Private Hive instance to avoid conflicts with the host app's Hive usage.
   final HiveInterface _hive;
 
+  final CleanupStrategy _cleanupStrategy;
+
   Box<Map>? _metaBox;
   LazyBox<List<int>>? _dataBox;
 
   /// Guards [_doInit] so concurrent callers share one init future.
   Completer<void>? _initCompleter;
+
+  Future<void>? _cleanupFuture;
+
+  bool _cleanupEnabled;
+  bool _capacityCleanupPending = false;
+
+  final Map<String, DateTime> _recentlyServed = {};
 
   Future<void> _ensureInitialized() {
     final currentCompleter = _initCompleter;
@@ -121,8 +150,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _dataBox = await _hive.openLazyBox<List<int>>(_kDataBoxName);
     }
 
-    // Run cleanup in background.
-    unawaited(_cleanupOldEntries());
+    if (_cleanupEnabled) {
+      unawaited(_scheduleCleanup());
+    }
   }
 
   /// Attempts to delete a Hive box from disk, tolerating missing files.
@@ -207,7 +237,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       );
     }
 
-    if (cachedFile == null || cachedFile.validTill.isBefore(DateTime.now())) {
+    if (cachedFile == null || cachedFile.validTill.isBefore(clock.now())) {
       try {
         await for (final response
             in _downloadFile(url, key, headers, withProgress)) {
@@ -285,24 +315,28 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
 
       // Store metadata + data in Hive.
-      final validTill = DateTime.now().add(stalePeriod);
+      final validTill = clock.now().add(stalePeriod);
       final cacheHeaders = response.headers;
       final eTag = cacheHeaders['etag'];
       final fileExtension = _getFileExtensionFromUrl(url);
       final relativePath =
           '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
+      final sanitizedKey = _sanitizeBoxKey(key);
+      _markServed(sanitizedKey);
 
       await _metaBox!.put(
-        _sanitizeBoxKey(key),
+        sanitizedKey,
         CacheEntryMetadata(
           url: url,
           relativePath: relativePath,
           validTill: validTill,
           eTag: eTag,
           length: receivedBytes,
+          touchedAt: clock.now(),
         ).toMap(),
       );
-      await _dataBox!.put(_sanitizeBoxKey(key), allBytes);
+      await _dataBox!.put(sanitizedKey, allBytes);
+      _scheduleCapacityCleanup();
 
       final file = _bytesToFile(relativePath, allBytes);
       yield FileInfo(file, FileSource.Online, validTill, url);
@@ -330,7 +364,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       return null;
     }
 
+    final sanitizedKey = _sanitizeBoxKey(key);
     final file = _bytesToFile(metadata.relativePath, bytes);
+    _markServed(sanitizedKey);
+    unawaited(_touchEntry(sanitizedKey));
     return FileInfo(
       file,
       FileSource.Cache,
@@ -353,19 +390,23 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final relativePath =
         '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
-    final validTill = DateTime.now().add(maxAge);
+    final validTill = clock.now().add(maxAge);
+    final sanitizedKey = _sanitizeBoxKey(key);
+    _markServed(sanitizedKey);
 
     await _metaBox!.put(
-      _sanitizeBoxKey(key),
+      sanitizedKey,
       CacheEntryMetadata(
         url: url,
         relativePath: relativePath,
         validTill: validTill,
         eTag: eTag,
         length: fileBytes.length,
+        touchedAt: clock.now(),
       ).toMap(),
     );
-    await _dataBox!.put(_sanitizeBoxKey(key), fileBytes);
+    await _dataBox!.put(sanitizedKey, fileBytes);
+    _scheduleCapacityCleanup();
 
     return _bytesToFile(relativePath, fileBytes);
   }
@@ -424,6 +465,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
+    final inFlightCleanup = _cleanupFuture;
+    if (inFlightCleanup != null) {
+      try {
+        await inFlightCleanup;
+      } on Object catch (_) {
+        // Already logged inside _cleanupOldEntries; ignore here.
+      }
+    }
+
     _httpClient.dispose();
 
     if (_metaBox != null && _metaBox!.isOpen) {
@@ -436,53 +486,136 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     _metaBox = null;
     _dataBox = null;
     _initCompleter = null;
+    _cleanupFuture = null;
+    _recentlyServed.clear();
+  }
+
+  /// Enables cleanup and waits for one cleanup sweep to finish.
+  ///
+  /// Concurrent calls share the same in-flight sweep. Once enabled, cleanup
+  /// remains enabled and stores above [maxNrOfCacheObjects] schedule a
+  /// coalesced background sweep.
+  Future<void> startCleanup() async {
+    await _ensureInitialized();
+    _cleanupEnabled = true;
+    await _scheduleCleanup();
+  }
+
+  Future<void> _scheduleCleanup({bool capacity = false}) {
+    final inFlight = _cleanupFuture;
+    if (inFlight != null) {
+      if (capacity) _capacityCleanupPending = true;
+      return inFlight;
+    }
+
+    late final Future<void> cleanup;
+    cleanup = () async {
+      do {
+        _capacityCleanupPending = false;
+        await _cleanupOldEntries();
+      } while (
+          _capacityCleanupPending && _metaBox!.length > maxNrOfCacheObjects);
+    }()
+        .whenComplete(() {
+      if (identical(_cleanupFuture, cleanup)) {
+        _cleanupFuture = null;
+      }
+    });
+    _cleanupFuture = cleanup;
+    return cleanup;
+  }
+
+  void _scheduleCapacityCleanup() {
+    if (_cleanupEnabled && _metaBox!.length > maxNrOfCacheObjects) {
+      unawaited(_scheduleCleanup(capacity: true));
+    }
+  }
+
+  bool _isSweepable(CacheEntryMetadata metadata, DateTime now) {
+    final idleDuration = maxIdleDuration;
+    if (idleDuration == null) return metadata.validTill.isBefore(now);
+    return now.difference(metadata.effectiveTouchedAt) >= idleDuration;
+  }
+
+  void _markServed(String key) {
+    final now = clock.now();
+    _recentlyServed[key] = now;
+    if (_recentlyServed.length > _kServedEntryPruneThreshold) {
+      _pruneRecentlyServed(now);
+    }
+  }
+
+  void _pruneRecentlyServed(DateTime now) {
+    _recentlyServed.removeWhere(
+      (_, servedAt) => now.difference(servedAt) >= _kServedEntryGracePeriod,
+    );
+  }
+
+  /// Number of entries currently protected from eviction. Test-only.
+  @visibleForTesting
+  int get debugRecentlyServedCount => _recentlyServed.length;
+
+  Future<void> _touchEntry(String key) async {
+    final box = _metaBox;
+    if (box == null || !box.isOpen) return;
+    try {
+      final raw = box.get(key);
+      if (raw == null) return;
+      final current = CacheEntryMetadata.fromMap(raw);
+      await box.put(
+        key,
+        CacheEntryMetadata(
+          url: current.url,
+          relativePath: current.relativePath,
+          validTill: current.validTill,
+          eTag: current.eTag,
+          length: current.length,
+          touchedAt: clock.now(),
+        ).toMap(),
+      );
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Failed to update touchedAt for $key: $e',
+        CacheManagerLogLevel.debug,
+      );
+    }
   }
 
   /// Clean up entries that have expired.
   Future<void> _cleanupOldEntries() async {
     try {
-      final now = DateTime.now();
-      final entries = <MapEntry<dynamic, CacheEntryMetadata>>[];
+      final now = clock.now();
+      _pruneRecentlyServed(now);
+      final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
       for (final key in _metaBox!.keys.toList()) {
         final raw = _metaBox!.get(key);
         if (raw != null) {
-          entries.add(MapEntry(key, CacheEntryMetadata.fromMap(raw)));
+          entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
         }
       }
 
       // Remove expired entries.
       for (final entry in entries) {
-        if (entry.value.validTill.isBefore(now)) {
-          await _metaBox!.delete(entry.key);
-          await _dataBox!.delete(entry.key);
-          try {
-            final file = _memFs.file('/${entry.value.relativePath}');
-            if (file.existsSync()) {
-              await file.delete();
-            }
-          } on Object catch (_) {}
+        if (_isSweepable(entry.value, now) &&
+            !_recentlyServed.containsKey(entry.key)) {
+          await _evictEntry(entry);
         }
       }
 
       // If cache is still too large, remove oldest entries.
       if (_metaBox!.length > maxNrOfCacheObjects) {
-        final sortedEntries = entries
-            .where((e) => _metaBox!.containsKey(e.key))
-            .toList()
-          ..sort((a, b) => a.value.validTill.compareTo(b.value.validTill));
+        final sortedEntries = _cleanupStrategy.sortForEviction(
+          entries.where((e) => _metaBox!.containsKey(e.key)).toList(),
+        );
 
         final toRemove = sortedEntries.length - maxNrOfCacheObjects;
-        for (var i = 0; i < toRemove; i++) {
-          final entry = sortedEntries[i];
-          await _metaBox!.delete(entry.key);
-          await _dataBox!.delete(entry.key);
-          try {
-            final file = _memFs.file('/${entry.value.relativePath}');
-            if (file.existsSync()) {
-              await file.delete();
-            }
-          } on Object catch (_) {}
+        var removed = 0;
+        for (final entry in sortedEntries) {
+          if (removed >= toRemove) break;
+          if (_recentlyServed.containsKey(entry.key)) continue;
+          await _evictEntry(entry);
+          removed++;
         }
       }
     } on Object catch (e) {
@@ -491,6 +624,19 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         CacheManagerLogLevel.warning,
       );
     }
+  }
+
+  Future<void> _evictEntry(
+    MapEntry<String, CacheEntryMetadata> entry,
+  ) async {
+    await _metaBox!.delete(entry.key);
+    await _dataBox!.delete(entry.key);
+    try {
+      final file = _memFs.file('/${entry.value.relativePath}');
+      if (file.existsSync()) {
+        await file.delete();
+      }
+    } on Object catch (_) {}
   }
 
   // ---------------------------------------------------------------
@@ -529,7 +675,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final fromCache = await getFileFromCache(resizedKey);
     if (fromCache != null) {
       yield fromCache;
-      if (fromCache.validTill.isAfter(DateTime.now())) {
+      if (fromCache.validTill.isAfter(clock.now())) {
         return;
       }
       withProgress = false;
@@ -580,7 +726,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           url,
           bytes,
           key: resizedKey,
-          maxAge: response.validTill.difference(DateTime.now()),
+          maxAge: response.validTill.difference(clock.now()),
         );
         yield FileInfo(
           file,

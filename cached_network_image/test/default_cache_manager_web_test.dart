@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io' as io;
 
+import 'package:cached_network_image_ce/cached_network_image.dart'
+    show LruCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager_web.dart';
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:clock/clock.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 // ignore: implementation_imports
@@ -61,6 +64,8 @@ void main() {
       final manager = DefaultCacheManager(hiveInstance: testHive);
       expect(manager.stalePeriod, const Duration(days: 7));
       expect(manager.maxNrOfCacheObjects, 200);
+      expect(manager.maxIdleDuration, isNull);
+      expect(manager.cleanupOnInitialize, isTrue);
     });
 
     test('accepts custom values', () {
@@ -68,9 +73,14 @@ void main() {
         hiveInstance: testHive,
         stalePeriod: const Duration(days: 14),
         maxNrOfCacheObjects: 50,
+        maxIdleDuration: const Duration(hours: 1),
+        cleanupOnInitialize: false,
+        cleanupStrategy: const LruCleanupStrategy(),
       );
       expect(manager.stalePeriod, const Duration(days: 14));
       expect(manager.maxNrOfCacheObjects, 50);
+      expect(manager.maxIdleDuration, const Duration(hours: 1));
+      expect(manager.cleanupOnInitialize, isFalse);
     });
 
     test('accepts custom httpClientFactory', () {
@@ -841,9 +851,204 @@ void main() {
   // =====================================================================
 
   group('WebCacheManager cleanup', () {
+    test('defers cleanup and uses touchedAt for idle retention', () async {
+      final createdAt = DateTime.utc(2026, 1, 1);
+      final writer = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxIdleDuration: const Duration(hours: 1),
+      );
+      await withClock(Clock.fixed(createdAt), () async {
+        await writer.putFile(
+          'https://example.com/web-deferred.png',
+          [0],
+        );
+        await writer.putFile(
+          'https://example.com/web-idle-old.png',
+          [1],
+        );
+      });
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(minutes: 90))),
+        () => writer.putFile(
+          'https://example.com/web-idle-recent.png',
+          [2],
+        ),
+      );
+      await writer.dispose();
+
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxIdleDuration: const Duration(hours: 1),
+      );
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(hours: 2))),
+        () async {
+          expect(
+            await manager.getFileFromCache(
+              'https://example.com/web-deferred.png',
+            ),
+            isNotNull,
+            reason: 'cleanup remains deferred during initialization',
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        },
+      );
+      await manager.dispose();
+
+      final cleanupManager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxIdleDuration: const Duration(hours: 1),
+      );
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(hours: 2, seconds: 31))),
+        () => cleanupManager.startCleanup(),
+      );
+
+      expect(
+        await cleanupManager.getFileFromCache(
+          'https://example.com/web-deferred.png',
+        ),
+        isNotNull,
+      );
+      expect(
+        await cleanupManager.getFileFromCache(
+          'https://example.com/web-idle-old.png',
+        ),
+        isNull,
+      );
+      expect(
+        await cleanupManager.getFileFromCache(
+          'https://example.com/web-idle-recent.png',
+        ),
+        isNotNull,
+      );
+      await cleanupManager.dispose();
+    });
+
+    test('startCleanup trims entries with the configured LRU strategy',
+        () async {
+      final createdAt = DateTime.utc(2026, 1, 1);
+      final writer = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      for (var i = 0; i < 4; i++) {
+        await withClock(
+          Clock.fixed(createdAt.add(Duration(minutes: i))),
+          () => writer.putFile(
+            'https://example.com/web-lru-$i.png',
+            [i],
+          ),
+        );
+      }
+      await writer.dispose();
+
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(hours: 1))),
+        () => manager.startCleanup(),
+      );
+
+      expect(
+        await manager.getFileFromCache('https://example.com/web-lru-0.png'),
+        isNull,
+      );
+      expect(
+        await manager.getFileFromCache('https://example.com/web-lru-1.png'),
+        isNull,
+      );
+      expect(
+        await manager.getFileFromCache('https://example.com/web-lru-2.png'),
+        isNotNull,
+      );
+      expect(
+        await manager.getFileFromCache('https://example.com/web-lru-3.png'),
+        isNotNull,
+      );
+      await manager.dispose();
+    });
+
+    test('capacity cleanup keeps the file returned by putFile', () async {
+      final createdAt = DateTime.utc(2026, 1, 1);
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 1,
+      );
+
+      await withClock(Clock.fixed(createdAt), () {
+        return manager.putFile(
+          'https://example.com/web-old.png',
+          [1],
+          maxAge: const Duration(days: 1),
+        );
+      });
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        manager.startCleanup,
+      );
+
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 32))),
+        () async {
+          final file = await manager.putFile(
+            'https://example.com/web-new.png',
+            [2],
+            maxAge: const Duration(minutes: 1),
+          );
+          await manager.startCleanup();
+          expect(await file.readAsBytes(), [2]);
+        },
+      );
+
+      expect(
+        await manager.getFileFromCache('https://example.com/web-new.png'),
+        isNotNull,
+      );
+      expect(
+        await manager.getFileFromCache('https://example.com/web-old.png'),
+        isNull,
+      );
+      await manager.dispose();
+    });
+
+    test('recently served bookkeeping prunes stale web entries', () async {
+      final createdAt = DateTime.utc(2026, 1, 1);
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+      );
+
+      await withClock(Clock.fixed(createdAt), () async {
+        for (var i = 0; i <= 64; i++) {
+          await manager.putFile('https://example.com/web-prune-$i.png', [i]);
+        }
+      });
+      expect(manager.debugRecentlyServedCount, 65);
+
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        () => manager.putFile('https://example.com/web-prune-new.png', [0]),
+      );
+
+      expect(manager.debugRecentlyServedCount, 1);
+      await manager.dispose();
+    });
+
     test('enforces maxNrOfCacheObjects by evicting oldest entries', () async {
       final manager = DefaultCacheManager(
         hiveInstance: testHive,
+        cleanupOnInitialize: false,
         maxNrOfCacheObjects: 3,
         stalePeriod: const Duration(days: 1),
       );

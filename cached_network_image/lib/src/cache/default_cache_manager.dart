@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file/file.dart';
 import 'package:file/local.dart';
@@ -58,6 +59,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ///
   /// [stalePeriod] is how long a file remains valid in the cache.
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
+  /// [maxIdleDuration] removes files that have not been accessed for that
+  /// duration instead of removing files based on [CacheEntryMetadata.validTill].
+  /// [cleanupOnInitialize] can defer cleanup until [startCleanup] is called.
   /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   /// [cacheDirectoryProvider] allows overriding where cache files are stored.
   ///   Defaults to [getTemporaryDirectory]. Pass [getApplicationSupportDirectory]
@@ -68,6 +72,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   DefaultCacheManager({
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
+    this.maxIdleDuration,
+    this.cleanupOnInitialize = true,
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
     CacheDirectoryProvider? cacheDirectoryProvider,
@@ -81,6 +87,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         _metadataDirectoryProvider = metadataDirectoryProvider,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
+        _cleanupEnabled = cleanupOnInitialize,
         _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
 
   /// Duration before cached files are considered stale.
@@ -88,6 +95,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Maximum number of objects in the cache before cleanup.
   final int maxNrOfCacheObjects;
+
+  /// Maximum time an entry may remain unaccessed before cleanup removes it.
+  ///
+  /// When null, cleanup keeps the legacy behavior of removing entries whose
+  /// [CacheEntryMetadata.validTill] is in the past.
+  final Duration? maxIdleDuration;
+
+  /// Whether cleanup is enabled during initialization.
+  final bool cleanupOnInitialize;
 
   /// Optional connection parameters for HTTP timeouts.
   ///
@@ -135,6 +151,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Handle to the background cleanup sweep launched by [_doInit], so
   /// [dispose] can wait for it instead of racing it.
   Future<void>? _cleanupFuture;
+
+  bool _cleanupEnabled;
+  bool _capacityCleanupPending = false;
 
   /// Initialize Hive and open the cache metadata box.
   ///
@@ -224,10 +243,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
     }
 
-    // Run cleanup in background, but keep a handle so dispose() can wait
-    // for it instead of nulling fields out from under it mid-sweep.
-    _cleanupFuture = _cleanupOldFiles();
-    unawaited(_cleanupFuture);
+    if (_cleanupEnabled) {
+      unawaited(_scheduleCleanup());
+    }
   }
 
   /// Attempts to delete a Hive box from disk, tolerating missing files.
@@ -323,7 +341,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     try {
       cachedFile = await getFileFromCache(key);
       if (cachedFile != null) {
-        final isExpired = cachedFile.validTill.isBefore(DateTime.now());
+        final isExpired = cachedFile.validTill.isBefore(clock.now());
         final hitOutcome = await runOnHitChain(
           _cacheInterceptors,
           CacheHitData(fileInfo: cachedFile, key: key, isExpired: isExpired),
@@ -345,7 +363,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       );
     }
 
-    if (cachedFile == null || cachedFile.validTill.isBefore(DateTime.now())) {
+    if (cachedFile == null || cachedFile.validTill.isBefore(clock.now())) {
       if (cachedFile == null) {
         // Run onMiss chain — interceptor may provide a synthetic response
         final syntheticFile = await runOnMissChain(
@@ -570,7 +588,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     // Store metadata in Hive
-    final validTill = DateTime.now().add(stalePeriod);
+    final validTill = clock.now().add(stalePeriod);
     final cacheHeaders = response.headers;
     final eTag = cacheHeaders['etag'];
 
@@ -580,7 +598,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       validTill: validTill,
       eTag: eTag,
       length: receivedBytes,
-      touchedAt: DateTime.now(),
+      touchedAt: clock.now(),
     );
     final storeOutcome = await runOnStoreChain(
       _cacheInterceptors,
@@ -593,7 +611,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
     final String deliveryPath;
     if (storeOutcome) {
-      await _cacheBox!.put(_sanitizeBoxKey(key), metadata.toMap());
+      final sanitizedKey = _sanitizeBoxKey(key);
+      _markServed(sanitizedKey);
+      await _cacheBox!.put(sanitizedKey, metadata.toMap());
+      _scheduleCapacityCleanup();
       deliveryPath = filePath;
     } else {
       // Interceptor rejected storage: copy to a temp file for this delivery,
@@ -642,7 +663,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// that have outlived the grace period once the map has grown enough to be
   /// worth sweeping.
   void _markServed(String sanitizedKey) {
-    final now = DateTime.now();
+    final now = clock.now();
     _recentlyServed[sanitizedKey] = now;
     if (_recentlyServed.length > _kServedEntryPruneThreshold) {
       _pruneRecentlyServed(now);
@@ -681,7 +702,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         validTill: current.validTill,
         eTag: current.eTag,
         length: current.length,
-        touchedAt: DateTime.now(),
+        touchedAt: clock.now(),
       );
       await box.put(sanitizedKey, updated.toMap());
     } on Object catch (e) {
@@ -704,6 +725,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     key ??= url;
+    final sanitizedKey = _sanitizeBoxKey(key);
+    _markServed(sanitizedKey);
     final relativePath = _generateRelativePath(key, fileExtension);
     final filePath = _cacheFilePath(relativePath);
 
@@ -712,17 +735,19 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final file = io.File(filePath);
     await file.writeAsBytes(fileBytes);
 
-    final validTill = DateTime.now().add(maxAge);
+    final validTill = clock.now().add(maxAge);
     await _cacheBox!.put(
-        _sanitizeBoxKey(key),
+        sanitizedKey,
         CacheEntryMetadata(
           url: url,
           relativePath: relativePath,
           validTill: validTill,
           eTag: eTag,
           length: fileBytes.length,
-          touchedAt: DateTime.now(),
+          touchedAt: clock.now(),
         ).toMap());
+
+    _scheduleCapacityCleanup();
 
     return const LocalFileSystem().file(filePath);
   }
@@ -812,10 +837,57 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _cleanupOldFiles();
   }
 
+  /// Enables cleanup and waits for one cleanup sweep to finish.
+  ///
+  /// Concurrent calls share the same in-flight sweep. Once enabled, cleanup
+  /// remains enabled and stores above [maxNrOfCacheObjects] schedule a
+  /// coalesced background sweep.
+  Future<void> startCleanup() async {
+    await _ensureInitialized();
+    _cleanupEnabled = true;
+    await _scheduleCleanup();
+  }
+
+  Future<void> _scheduleCleanup({bool capacity = false}) {
+    final inFlight = _cleanupFuture;
+    if (inFlight != null) {
+      if (capacity) _capacityCleanupPending = true;
+      return inFlight;
+    }
+
+    late final Future<void> cleanup;
+    cleanup = () async {
+      do {
+        _capacityCleanupPending = false;
+        await _cleanupOldFiles();
+      } while (
+          _capacityCleanupPending && _cacheBox!.length > maxNrOfCacheObjects);
+    }()
+        .whenComplete(() {
+      if (identical(_cleanupFuture, cleanup)) {
+        _cleanupFuture = null;
+      }
+    });
+    _cleanupFuture = cleanup;
+    return cleanup;
+  }
+
+  void _scheduleCapacityCleanup() {
+    if (_cleanupEnabled && _cacheBox!.length > maxNrOfCacheObjects) {
+      unawaited(_scheduleCleanup(capacity: true));
+    }
+  }
+
+  bool _isSweepable(CacheEntryMetadata metadata, DateTime now) {
+    final idleDuration = maxIdleDuration;
+    if (idleDuration == null) return metadata.validTill.isBefore(now);
+    return now.difference(metadata.effectiveTouchedAt) >= idleDuration;
+  }
+
   /// Clean up files that haven't been used in a while.
   Future<void> _cleanupOldFiles() async {
     try {
-      final now = DateTime.now();
+      final now = clock.now();
       _pruneRecentlyServed(now);
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
@@ -833,7 +905,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       // Remove expired entries
       for (final entry in entries) {
-        if (entry.value.validTill.isBefore(now) &&
+        if (_isSweepable(entry.value, now) &&
             !_recentlyServed.containsKey(entry.key)) {
           await _evictEntry(entry);
         }
@@ -932,7 +1004,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final fromCache = await getFileFromCache(resizedKey);
     if (fromCache != null) {
       yield fromCache;
-      if (fromCache.validTill.isAfter(DateTime.now())) {
+      if (fromCache.validTill.isAfter(clock.now())) {
         return;
       }
       withProgress = false;
@@ -1044,7 +1116,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         (await resized.toByteData(format: ui.ImageByteFormat.png))!
             .buffer
             .asUint8List();
-    final maxAge = originalFile.validTill.difference(DateTime.now());
+    final maxAge = originalFile.validTill.difference(clock.now());
 
     final file = await putFile(
       originalFile.originalUrl,

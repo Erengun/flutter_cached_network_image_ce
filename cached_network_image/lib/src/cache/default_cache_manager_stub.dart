@@ -24,6 +24,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @override
   Future<void> emptyCache() => throw UnsupportedError('Unsupported platform');
 
+  Future<int> getCacheSize() => throw UnsupportedError('Unsupported platform');
+
   @override
   Future<FileInfo?> getFileFromCache(String key,
           {bool ignoreMemCache = false}) =>

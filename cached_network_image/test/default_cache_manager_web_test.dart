@@ -221,6 +221,55 @@ void main() {
         isNull,
       );
     });
+
+    test('getCacheSize sums cached bytes and drops on remove/empty', () async {
+      expect(await manager.getCacheSize(), 0);
+
+      const url1 = 'https://example.com/size-1.png';
+      const url2 = 'https://example.com/size-2.png';
+      await manager.putFile(url1, List.filled(10, 1), fileExtension: 'png');
+      await manager.putFile(url2, List.filled(32, 2), fileExtension: 'png');
+      expect(await manager.getCacheSize(), 42);
+
+      await manager.removeFile(url1);
+      expect(await manager.getCacheSize(), 32);
+
+      await manager.emptyCache();
+      expect(await manager.getCacheSize(), 0);
+    });
+
+    test('getCacheSize ignores malformed metadata entries', () async {
+      await manager.putFile(
+        'https://example.com/size-ok.png',
+        List.filled(32, 1),
+        fileExtension: 'png',
+      );
+      final metaBox = testHive.box<Map>('cached_network_image_cache');
+      await metaBox.put('__bad_length__', {'length': 'not-an-int'});
+      // Has a length but lacks the url that CacheEntryMetadata.fromMap needs.
+      await metaBox.put('__no_url__', {'length': 5});
+
+      expect(await manager.getCacheSize(), 32);
+    });
+
+    test('getCacheSize skips metadata whose bytes were never stored', () async {
+      await manager.putFile(
+        'https://example.com/size-ok.png',
+        List.filled(32, 1),
+        fileExtension: 'png',
+      );
+      await testHive.box<Map>('cached_network_image_cache').put(
+            'https://example.com/no-bytes.png',
+            CacheEntryMetadata(
+              url: 'https://example.com/no-bytes.png',
+              relativePath: 'no-bytes.png',
+              validTill: DateTime.now().add(const Duration(days: 1)),
+              length: 10,
+            ).toMap(),
+          );
+
+      expect(await manager.getCacheSize(), 32);
+    });
   });
 
   // =====================================================================

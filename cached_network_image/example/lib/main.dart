@@ -38,6 +38,7 @@ class HomePage extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('CachedNetworkImage CE'),
+          actions: const [CacheSizeButton()],
           bottom: const TabBar(
             isScrollable: true,
             tabs: [
@@ -61,6 +62,42 @@ class HomePage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Shows the disk cache size of the shared cache manager, with an option to
+/// clear it.
+class CacheSizeButton extends StatelessWidget {
+  const CacheSizeButton({super.key});
+
+  Future<void> _showCacheSize(BuildContext context) async {
+    final manager = CachedNetworkImageProvider.defaultCacheManager;
+    if (manager is! DefaultCacheManager) return;
+
+    final bytes = await manager.getCacheSize();
+    if (!context.mounted) return;
+
+    final megabytes = (bytes / (1024 * 1024)).toStringAsFixed(2);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Image cache: $megabytes MB ($bytes bytes)'),
+          action: SnackBarAction(
+            label: 'Clear',
+            onPressed: manager.emptyCache,
+          ),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.storage),
+      tooltip: 'Cache size',
+      onPressed: () => _showCacheSize(context),
     );
   }
 }

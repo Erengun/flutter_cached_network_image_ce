@@ -761,6 +761,34 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _cacheBox!.clear();
   }
 
+  /// Returns the total size in bytes of the images stored in the disk cache.
+  ///
+  /// Counts only entries tracked by the cache, not Flutter's in-memory
+  /// [ImageCache]. Sizes are read from disk, so entries whose file was removed
+  /// outside the cache (e.g. by the OS) count as 0. Returns 0 when the cache
+  /// is empty.
+  Future<int> getCacheSize() async {
+    await _ensureInitialized();
+    final cacheDir = _cacheDir!;
+    final relativePaths = <String>{};
+    for (final raw in _cacheBox!.values) {
+      try {
+        relativePaths.add(CacheEntryMetadata.fromMap(raw).relativePath);
+      } on Object catch (_) {
+        // Malformed entry: never served from the cache, so not counted.
+      }
+    }
+    var total = 0;
+    for (final relativePath in relativePaths) {
+      try {
+        total += await io.File(path.join(cacheDir, relativePath)).length();
+      } on io.FileSystemException catch (_) {
+        // File is gone; its metadata is cleaned up lazily elsewhere.
+      }
+    }
+    return total;
+  }
+
   @override
   Future<void> dispose() async {
     final inFlightInit = _initCompleter;

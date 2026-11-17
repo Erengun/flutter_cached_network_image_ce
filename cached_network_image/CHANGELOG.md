@@ -1,7 +1,7 @@
 ## Unreleased
 
-* **Feature:** `DefaultCacheManager` now supports access-based retention with `maxIdleDuration`, deferred destructive cleanup with `cleanupOnInitialize: false`, and an idempotent `startCleanup()` gate. Once cleanup is enabled, stores above `maxNrOfCacheObjects` schedule a coalesced background sweep. Existing expiry-based cleanup remains the default.
-* **Feature:** The web cache manager now records access timestamps and supports the same cleanup strategy, idle-retention, and deferred-cleanup API as native platforms.
+* **Feature:** `DefaultCacheManager` now supports access-based retention with `maxIdleDuration`, deferred destructive cleanup with `cleanupOnInitialize: false`, and an idempotent `startCleanup()` gate. Startup cleanup keeps its existing default; runtime capacity sweeps are opt-in through `startCleanup()`. Once enabled, stores above `maxNrOfCacheObjects` schedule a coalesced background sweep.
+* **Feature:** The web cache manager now records access timestamps and supports the same cleanup strategy, idle-retention, and deferred-cleanup API as native platforms. Legacy web entries without access timestamps are treated as oldest.
 
 ## [4.13.2] - 2026-09-26
 

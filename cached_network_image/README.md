@@ -187,16 +187,18 @@ final cacheManager = DefaultCacheManager(
 await cacheManager.startCleanup();
 ```
 
-`startCleanup()` enables cleanup for the manager's remaining lifetime and
-waits for one sweep. Concurrent calls share an in-flight sweep. Once enabled,
-stores that exceed `maxNrOfCacheObjects` schedule one coalesced background
-sweep. Capacity eviction follows the configured `cleanupStrategy`.
+`cleanupOnInitialize` controls the startup sweep only. Runtime capacity sweeps
+are opt-in: `startCleanup()` enables them for the manager's remaining lifetime
+and waits for one sweep. Concurrent calls share an in-flight sweep. Once
+enabled, stores that exceed `maxNrOfCacheObjects` schedule one coalesced
+background sweep. Capacity eviction follows the configured `cleanupStrategy`.
 
 When `maxIdleDuration` is omitted, cleanup retains the existing behavior and
 removes entries whose `validTill` is in the past. With idle retention enabled,
-entries are removed when `now - effectiveTouchedAt >= maxIdleDuration`;
-`effectiveTouchedAt` falls back to `validTill` for metadata written before
-access timestamps were introduced. No cache migration is required.
+entries are removed when `now - effectiveTouchedAt >= maxIdleDuration`.
+Native metadata written before access timestamps were introduced falls back to
+`validTill`. Legacy web entries are treated as oldest because earlier web
+versions never recorded access timestamps. No cache migration is required.
 
 **Web Platform Headers Support:** Custom headers (like `Authorization`) are
 only supported with `ImageRenderMethodForWeb.HttpGet`. The default

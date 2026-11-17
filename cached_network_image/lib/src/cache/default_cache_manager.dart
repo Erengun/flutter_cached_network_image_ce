@@ -18,6 +18,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'cache_entry_metadata.dart';
+import 'cleanup_coordinator.dart';
 import 'cleanup_strategy.dart';
 import 'interceptors/cache_interceptor.dart';
 import 'interceptors/http_interceptor.dart';
@@ -33,8 +34,8 @@ const _kDefaultStalePeriod = Duration(days: 7);
 const _kOrphanFileGracePeriod = Duration(minutes: 5);
 const _kServedEntryGracePeriod = Duration(seconds: 30);
 
-/// Size at which [DefaultCacheManager._recentlyServed] is swept for expired
-/// entries. Only a bound on bookkeeping, not on how many entries are guarded.
+/// Size at which recently served entries are swept for expired records.
+/// Only a bound on bookkeeping, not on how many entries are guarded.
 const _kServedEntryPruneThreshold = 64;
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico', 'webp'];
@@ -87,7 +88,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         _metadataDirectoryProvider = metadataDirectoryProvider,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
-        _cleanupEnabled = cleanupOnInitialize,
         _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
 
   /// Duration before cached files are considered stale.
@@ -136,24 +136,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Box<Map>? _cacheBox;
   String? _cacheDir;
 
-  /// Box keys handed out to a caller recently, with the time they were served.
-  ///
-  /// A [FileInfo] only carries a path, so the caller reads the file some time
-  /// after [getFileFromCache] returns. Evicting one of these in the meantime
-  /// leaves the caller holding a path to a file that no longer exists, so the
-  /// cleanup sweep leaves them alone for [_kServedEntryGracePeriod].
-  final Map<String, DateTime> _recentlyServed = {};
+  final CleanupCoordinator _cleanup = CleanupCoordinator(
+    servedEntryGracePeriod: _kServedEntryGracePeriod,
+    servedEntryPruneThreshold: _kServedEntryPruneThreshold,
+  );
 
   /// Guards [_doInit] so that concurrent callers (e.g. multiple images
   /// loading at the same time on cold start) share the same init future.
   Completer<void>? _initCompleter;
-
-  /// Handle to the background cleanup sweep launched by [_doInit], so
-  /// [dispose] can wait for it instead of racing it.
-  Future<void>? _cleanupFuture;
-
-  bool _cleanupEnabled;
-  bool _capacityCleanupPending = false;
 
   /// Initialize Hive and open the cache metadata box.
   ///
@@ -243,7 +233,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
     }
 
-    if (_cleanupEnabled) {
+    if (cleanupOnInitialize) {
       unawaited(_scheduleCleanup());
     }
   }
@@ -516,6 +506,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final fileExtension = _getFileExtensionFromUrl(url);
     final relativePath = _generateRelativePath(key, fileExtension);
     final filePath = _cacheFilePath(relativePath);
+    final sanitizedKey = _sanitizeBoxKey(key);
 
     await _ensureCacheDirectoryExists();
 
@@ -542,6 +533,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       await sink.flush();
       await sink.close();
 
+      _markServed(sanitizedKey);
       final finalFile = io.File(filePath);
       try {
         await tempFile.rename(filePath);
@@ -611,8 +603,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
     final String deliveryPath;
     if (storeOutcome) {
-      final sanitizedKey = _sanitizeBoxKey(key);
-      _markServed(sanitizedKey);
       await _cacheBox!.put(sanitizedKey, metadata.toMap());
       _scheduleCapacityCleanup();
       deliveryPath = filePath;
@@ -663,22 +653,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// that have outlived the grace period once the map has grown enough to be
   /// worth sweeping.
   void _markServed(String sanitizedKey) {
-    final now = clock.now();
-    _recentlyServed[sanitizedKey] = now;
-    if (_recentlyServed.length > _kServedEntryPruneThreshold) {
-      _pruneRecentlyServed(now);
-    }
-  }
-
-  void _pruneRecentlyServed(DateTime now) {
-    _recentlyServed.removeWhere(
-      (_, servedAt) => now.difference(servedAt) >= _kServedEntryGracePeriod,
-    );
+    _cleanup.markServed(sanitizedKey, clock.now());
   }
 
   /// Number of entries currently protected from eviction. Test-only.
   @visibleForTesting
-  int get debugRecentlyServedCount => _recentlyServed.length;
+  int get debugRecentlyServedCount => _cleanup.recentlyServedCount;
 
   /// Updates the [touchedAt] timestamp for [key] in the cache box.
   ///
@@ -797,7 +777,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
-    final inFlightCleanup = _cleanupFuture;
+    final inFlightCleanup = _cleanup.cleanupFuture;
     if (inFlightCleanup != null) {
       try {
         await inFlightCleanup;
@@ -822,11 +802,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       // Ignore errors when closing Hive (e.g. residual lock file already gone).
     }
 
-    _recentlyServed.clear();
     _cacheBox = null;
     _cacheDir = null;
     _initCompleter = null;
-    _cleanupFuture = null;
+    _cleanup.reset();
   }
 
   /// Runs the eviction sweep synchronously, for tests that need to observe
@@ -834,7 +813,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @visibleForTesting
   Future<void> debugRunCleanup() async {
     await _ensureInitialized();
-    await _cleanupOldFiles();
+    await _scheduleCleanup();
   }
 
   /// Enables cleanup and waits for one cleanup sweep to finish.
@@ -844,37 +823,30 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// coalesced background sweep.
   Future<void> startCleanup() async {
     await _ensureInitialized();
-    _cleanupEnabled = true;
+    _cleanup.capacityCleanupEnabled = true;
     await _scheduleCleanup();
   }
 
   Future<void> _scheduleCleanup({bool capacity = false}) {
-    final inFlight = _cleanupFuture;
-    if (inFlight != null) {
-      if (capacity) _capacityCleanupPending = true;
-      return inFlight;
-    }
-
-    late final Future<void> cleanup;
-    cleanup = () async {
-      do {
-        _capacityCleanupPending = false;
-        await _cleanupOldFiles();
-      } while (
-          _capacityCleanupPending && _cacheBox!.length > maxNrOfCacheObjects);
-    }()
-        .whenComplete(() {
-      if (identical(_cleanupFuture, cleanup)) {
-        _cleanupFuture = null;
-      }
-    });
-    _cleanupFuture = cleanup;
-    return cleanup;
+    return _cleanup.schedule(
+      _cleanupOldFiles,
+      _isOverCapacity,
+      capacity: capacity,
+    );
   }
 
   void _scheduleCapacityCleanup() {
-    if (_cleanupEnabled && _cacheBox!.length > maxNrOfCacheObjects) {
+    if (_cleanup.capacityCleanupEnabled && _isOverCapacity()) {
       unawaited(_scheduleCleanup(capacity: true));
+    }
+  }
+
+  bool _isOverCapacity() {
+    final box = _cacheBox;
+    try {
+      return box != null && box.isOpen && box.length > maxNrOfCacheObjects;
+    } on Object catch (_) {
+      return false;
     }
   }
 
@@ -888,7 +860,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<void> _cleanupOldFiles() async {
     try {
       final now = clock.now();
-      _pruneRecentlyServed(now);
+      _cleanup.pruneRecentlyServed(now);
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
       for (final key in _cacheBox!.keys.toList()) {
@@ -905,8 +877,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       // Remove expired entries
       for (final entry in entries) {
-        if (_isSweepable(entry.value, now) &&
-            !_recentlyServed.containsKey(entry.key)) {
+        if (_isSweepable(entry.value, now) && !_cleanup.protects(entry.key)) {
           await _evictEntry(entry);
         }
       }
@@ -923,7 +894,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           if (removed >= toRemove) break;
           // Skip rather than stop, so a recently served entry costs the cache
           // its place in the eviction order but not the size budget.
-          if (_recentlyServed.containsKey(entry.key)) continue;
+          if (_cleanup.protects(entry.key)) continue;
           await _evictEntry(entry);
           removed++;
         }

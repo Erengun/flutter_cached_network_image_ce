@@ -978,6 +978,78 @@ void main() {
       await manager.dispose();
     });
 
+    test('LRU treats legacy web entries as older than touched entries',
+        () async {
+      final metadataBox = await testHive.openBox<Map>(
+        'cached_network_image_cache',
+      );
+      final dataBox = await testHive.openLazyBox<List<int>>(
+        'cached_network_image_data',
+      );
+      final createdAt = DateTime.utc(2026, 1, 1);
+      await metadataBox.put('legacy', {
+        'url': 'https://example.com/legacy.png',
+        'relativePath': 'legacy.png',
+        'validTill':
+            createdAt.add(const Duration(days: 30)).millisecondsSinceEpoch,
+        'length': 1,
+      });
+      await dataBox.put('legacy', [0]);
+
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      await withClock(Clock.fixed(createdAt), () async {
+        await manager.putFile('https://example.com/fresh-1.png', [1]);
+        await manager.putFile('https://example.com/fresh-2.png', [2]);
+      });
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        manager.startCleanup,
+      );
+
+      expect(await manager.getFileFromCache('legacy'), isNull);
+      expect(
+        await manager.getFileFromCache('https://example.com/fresh-1.png'),
+        isNotNull,
+      );
+      expect(
+        await manager.getFileFromCache('https://example.com/fresh-2.png'),
+        isNotNull,
+      );
+      await manager.dispose();
+    });
+
+    test('idle cleanup expires legacy web entries without touchedAt', () async {
+      final metadataBox = await testHive.openBox<Map>(
+        'cached_network_image_cache',
+      );
+      final dataBox = await testHive.openLazyBox<List<int>>(
+        'cached_network_image_data',
+      );
+      final now = DateTime.utc(2026, 1, 1);
+      await metadataBox.put('legacy-idle', {
+        'url': 'https://example.com/legacy-idle.png',
+        'relativePath': 'legacy-idle.png',
+        'validTill': now.add(const Duration(days: 30)).millisecondsSinceEpoch,
+        'length': 1,
+      });
+      await dataBox.put('legacy-idle', [0]);
+
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        cleanupOnInitialize: false,
+        maxIdleDuration: const Duration(hours: 1),
+      );
+      await withClock(Clock.fixed(now), manager.startCleanup);
+
+      expect(await manager.getFileFromCache('legacy-idle'), isNull);
+      await manager.dispose();
+    });
+
     test('capacity cleanup keeps the file returned by putFile', () async {
       final createdAt = DateTime.utc(2026, 1, 1);
       final manager = DefaultCacheManager(

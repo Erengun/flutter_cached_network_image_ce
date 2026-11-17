@@ -13,6 +13,7 @@ import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 
 import 'cache_entry_metadata.dart';
+import 'cleanup_coordinator.dart';
 import 'cleanup_strategy.dart';
 import 'shared_http_client.dart';
 
@@ -61,7 +62,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     CleanupStrategy? cleanupStrategy,
   })  : _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
         _hive = hiveInstance ?? HiveImpl(),
-        _cleanupEnabled = cleanupOnInitialize,
         _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
 
   /// Duration before cached files are considered stale.
@@ -105,12 +105,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Guards [_doInit] so concurrent callers share one init future.
   Completer<void>? _initCompleter;
 
-  Future<void>? _cleanupFuture;
-
-  bool _cleanupEnabled;
-  bool _capacityCleanupPending = false;
-
-  final Map<String, DateTime> _recentlyServed = {};
+  final CleanupCoordinator _cleanup = CleanupCoordinator(
+    servedEntryGracePeriod: _kServedEntryGracePeriod,
+    servedEntryPruneThreshold: _kServedEntryPruneThreshold,
+  );
 
   Future<void> _ensureInitialized() {
     final currentCompleter = _initCompleter;
@@ -150,7 +148,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _dataBox = await _hive.openLazyBox<List<int>>(_kDataBoxName);
     }
 
-    if (_cleanupEnabled) {
+    if (cleanupOnInitialize) {
       unawaited(_scheduleCleanup());
     }
   }
@@ -352,19 +350,20 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }) async {
     await _ensureInitialized();
 
-    final raw = _metaBox!.get(_sanitizeBoxKey(key));
+    final sanitizedKey = _sanitizeBoxKey(key);
+
+    final raw = _metaBox!.get(sanitizedKey);
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
 
-    final bytes = await _dataBox!.get(_sanitizeBoxKey(key));
+    final bytes = await _dataBox!.get(sanitizedKey);
     if (bytes == null) {
       // Metadata exists but data is missing — clean up.
-      await _metaBox!.delete(_sanitizeBoxKey(key));
+      await _metaBox!.delete(sanitizedKey);
       return null;
     }
 
-    final sanitizedKey = _sanitizeBoxKey(key);
     final file = _bytesToFile(metadata.relativePath, bytes);
     _markServed(sanitizedKey);
     unawaited(_touchEntry(sanitizedKey));
@@ -465,7 +464,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
-    final inFlightCleanup = _cleanupFuture;
+    final inFlightCleanup = _cleanup.cleanupFuture;
     if (inFlightCleanup != null) {
       try {
         await inFlightCleanup;
@@ -486,8 +485,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     _metaBox = null;
     _dataBox = null;
     _initCompleter = null;
-    _cleanupFuture = null;
-    _recentlyServed.clear();
+    _cleanup.reset();
   }
 
   /// Enables cleanup and waits for one cleanup sweep to finish.
@@ -497,37 +495,30 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// coalesced background sweep.
   Future<void> startCleanup() async {
     await _ensureInitialized();
-    _cleanupEnabled = true;
+    _cleanup.capacityCleanupEnabled = true;
     await _scheduleCleanup();
   }
 
   Future<void> _scheduleCleanup({bool capacity = false}) {
-    final inFlight = _cleanupFuture;
-    if (inFlight != null) {
-      if (capacity) _capacityCleanupPending = true;
-      return inFlight;
-    }
-
-    late final Future<void> cleanup;
-    cleanup = () async {
-      do {
-        _capacityCleanupPending = false;
-        await _cleanupOldEntries();
-      } while (
-          _capacityCleanupPending && _metaBox!.length > maxNrOfCacheObjects);
-    }()
-        .whenComplete(() {
-      if (identical(_cleanupFuture, cleanup)) {
-        _cleanupFuture = null;
-      }
-    });
-    _cleanupFuture = cleanup;
-    return cleanup;
+    return _cleanup.schedule(
+      _cleanupOldEntries,
+      _isOverCapacity,
+      capacity: capacity,
+    );
   }
 
   void _scheduleCapacityCleanup() {
-    if (_cleanupEnabled && _metaBox!.length > maxNrOfCacheObjects) {
+    if (_cleanup.capacityCleanupEnabled && _isOverCapacity()) {
       unawaited(_scheduleCleanup(capacity: true));
+    }
+  }
+
+  bool _isOverCapacity() {
+    final box = _metaBox;
+    try {
+      return box != null && box.isOpen && box.length > maxNrOfCacheObjects;
+    } on Object catch (_) {
+      return false;
     }
   }
 
@@ -538,22 +529,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }
 
   void _markServed(String key) {
-    final now = clock.now();
-    _recentlyServed[key] = now;
-    if (_recentlyServed.length > _kServedEntryPruneThreshold) {
-      _pruneRecentlyServed(now);
-    }
-  }
-
-  void _pruneRecentlyServed(DateTime now) {
-    _recentlyServed.removeWhere(
-      (_, servedAt) => now.difference(servedAt) >= _kServedEntryGracePeriod,
-    );
+    _cleanup.markServed(key, clock.now());
   }
 
   /// Number of entries currently protected from eviction. Test-only.
   @visibleForTesting
-  int get debugRecentlyServedCount => _recentlyServed.length;
+  int get debugRecentlyServedCount => _cleanup.recentlyServedCount;
 
   Future<void> _touchEntry(String key) async {
     final box = _metaBox;
@@ -585,20 +566,32 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<void> _cleanupOldEntries() async {
     try {
       final now = clock.now();
-      _pruneRecentlyServed(now);
+      _cleanup.pruneRecentlyServed(now);
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
       for (final key in _metaBox!.keys.toList()) {
         final raw = _metaBox!.get(key);
         if (raw != null) {
-          entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
+          final metadata = CacheEntryMetadata.fromMap(raw);
+          entries.add(MapEntry(
+            key as String,
+            metadata.touchedAt == null
+                ? CacheEntryMetadata(
+                    url: metadata.url,
+                    relativePath: metadata.relativePath,
+                    validTill: metadata.validTill,
+                    eTag: metadata.eTag,
+                    length: metadata.length,
+                    touchedAt: DateTime.fromMillisecondsSinceEpoch(0),
+                  )
+                : metadata,
+          ));
         }
       }
 
       // Remove expired entries.
       for (final entry in entries) {
-        if (_isSweepable(entry.value, now) &&
-            !_recentlyServed.containsKey(entry.key)) {
+        if (_isSweepable(entry.value, now) && !_cleanup.protects(entry.key)) {
           await _evictEntry(entry);
         }
       }
@@ -613,7 +606,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         var removed = 0;
         for (final entry in sortedEntries) {
           if (removed >= toRemove) break;
-          if (_recentlyServed.containsKey(entry.key)) continue;
+          if (_cleanup.protects(entry.key)) continue;
           await _evictEntry(entry);
           removed++;
         }

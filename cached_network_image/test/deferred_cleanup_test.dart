@@ -17,6 +17,38 @@ void main() {
       expect(manager.maxIdleDuration, isNull);
     });
 
+    test('default startup cleanup does not enable runtime capacity sweeps',
+        () async {
+      final dir = _temporaryDirectory('cleanup_runtime_opt_in_');
+      final createdAt = DateTime.utc(2026, 1, 1);
+      final strategy = _CountingLruCleanupStrategy();
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        cleanupStrategy: strategy,
+      );
+
+      await manager.debugRunCleanup();
+      await withClock(Clock.fixed(createdAt), () async {
+        for (var i = 0; i < 3; i++) {
+          await manager.putFile(
+            'https://example.com/default-$i',
+            [i],
+            key: 'default-$i',
+          );
+        }
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(strategy.calls, 0);
+
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        manager.startCleanup,
+      );
+      expect(strategy.calls, 1);
+      await manager.dispose();
+    });
+
     test('deferred initialization leaves expired and excess entries intact',
         () async {
       final dir = _temporaryDirectory('cleanup_deferred_');
@@ -279,6 +311,41 @@ void main() {
       );
       expect(await _existingCount(manager, 'store', 3), 2);
       expect(strategy.calls, 1);
+      await manager.dispose();
+    });
+
+    test('dispose resets runtime cleanup before the manager is reused',
+        () async {
+      final dir = _temporaryDirectory('cleanup_dispose_reset_');
+      final createdAt = DateTime.utc(2026, 1, 1);
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 1,
+      );
+
+      await manager.startCleanup();
+      await manager.dispose();
+
+      await withClock(Clock.fixed(createdAt), () {
+        return manager.putFile(
+          'https://example.com/reused-old',
+          [1],
+          key: 'reused-old',
+        );
+      });
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        () => manager.putFile(
+          'https://example.com/reused-new',
+          [2],
+          key: 'reused-new',
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(await manager.getFileFromCache('reused-old'), isNotNull);
+      expect(await manager.getFileFromCache('reused-new'), isNotNull);
       await manager.dispose();
     });
 

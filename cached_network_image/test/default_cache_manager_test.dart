@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:cached_network_image_ce/cached_network_image.dart'
     show LruCleanupStrategy, TtlCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
+import 'package:cached_network_image_ce/src/cache/interceptors/cache_interceptor.dart';
 import 'package:cached_network_image_ce/src/image_provider/_image_loader.dart'
     as io_loader;
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
@@ -30,6 +31,19 @@ import 'support/http_clients.dart';
 class _CorruptPayload {
   _CorruptPayload(this.data);
   final String data;
+}
+
+final class _BlockingStoreInterceptor extends CacheInterceptor {
+  final Completer<void> entered = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+
+  @override
+  void onStore(CacheStoreData data, CacheStoreHandler handler) {
+    entered.complete();
+    _release.future.then((_) => handler.next(data));
+  }
+
+  void release() => _release.complete();
 }
 
 /// Runs [onOpen] right before opening the delegate file.
@@ -2124,7 +2138,7 @@ void main() {
       expect(manager.debugRecentlyServedCount, 0);
     });
 
-    test('evicts down to maxNrOfCacheObjects after putFile handoff expires',
+    test('allows temporary overflow until putFile handoff protection expires',
         () async {
       final dir = io.Directory.systemTemp.createTempSync('evict_plain_');
       addTearDown(() {
@@ -2152,6 +2166,10 @@ void main() {
             key: 'middle', maxAge: const Duration(hours: 2));
         await manager.putFile('https://example.com/c.png', [3],
             key: 'latest', maxAge: const Duration(hours: 3));
+        await manager.debugRunCleanup();
+        expect(await manager.getFileFromCache('soonest'), isNotNull);
+        expect(await manager.getFileFromCache('middle'), isNotNull);
+        expect(await manager.getFileFromCache('latest'), isNotNull);
       });
 
       await withClock(
@@ -2162,6 +2180,61 @@ void main() {
       expect(await manager.getFileFromCache('soonest'), isNull);
       expect(await manager.getFileFromCache('middle'), isNotNull);
       expect(await manager.getFileFromCache('latest'), isNotNull);
+    });
+
+    test('re-download protects the replacement file before metadata is stored',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('redownload_guard_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final storeGate = _BlockingStoreInterceptor();
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 0,
+        cacheInterceptors: [storeGate],
+        httpClientFactory: () => http_testing.MockClient(
+          (_) async => http.Response.bytes([2], 200),
+        ),
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+      const url = 'https://example.com/replacement.bin';
+      final createdAt = DateTime.utc(2026, 1, 1);
+      await withClock(
+        Clock.fixed(createdAt),
+        () => manager.putFile(
+          url,
+          [1],
+          key: 'replacement',
+          maxAge: Duration.zero,
+        ),
+      );
+
+      await withClock(
+        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        () async {
+          final responses =
+              manager.getFileStream(url, key: 'replacement').toList();
+          await storeGate.entered.future;
+          await manager.debugRunCleanup();
+          storeGate.release();
+
+          final online = (await responses)
+              .whereType<FileInfo>()
+              .lastWhere((info) => info.source == FileSource.Online);
+          expect(await online.file.readAsBytes(), [2]);
+        },
+      );
+
+      final cached = await manager.getFileFromCache('replacement');
+      expect(await cached!.file.readAsBytes(), [2]);
     });
 
     test('removes expired entries during initialization', () async {

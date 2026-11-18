@@ -2350,9 +2350,8 @@ void main() {
       });
       final deleteStarted = Completer<void>();
       final releaseDelete = Completer<void>();
-      addTearDown(() {
-        if (!releaseDelete.isCompleted) releaseDelete.complete();
-      });
+      final replacementIoStarted = Completer<void>();
+      var watchReplacementIo = false;
       String? blockedPath;
 
       final manager = DefaultCacheManager(
@@ -2360,6 +2359,7 @@ void main() {
         cleanupOnInitialize: false,
       );
       addTearDown(() async {
+        if (!releaseDelete.isCompleted) releaseDelete.complete();
         try {
           await manager.dispose();
         } on Object catch (_) {}
@@ -2387,19 +2387,18 @@ void main() {
 
               expect(await manager.getFileFromCache('evicting'), isNull);
 
-              var writeCompleted = false;
-              final write = manager
-                  .putFile(
-                    'https://example.com/evicting.bin',
-                    [2],
-                    key: 'evicting',
-                  )
-                  .whenComplete(() => writeCompleted = true);
+              watchReplacementIo = true;
+              final write = manager.putFile(
+                'https://example.com/evicting.bin',
+                [2],
+                key: 'evicting',
+              );
               await Future<void>.delayed(Duration.zero);
-              expect(writeCompleted, isFalse);
+              expect(replacementIoStarted.isCompleted, isFalse);
 
               releaseDelete.complete();
               await cleanup;
+              await replacementIoStarted.future;
               expect(await (await write).readAsBytes(), [2]);
             },
           );
@@ -2408,6 +2407,12 @@ void main() {
           final file = Zone.root.run(() => io.File(filePath));
           if (filePath != blockedPath) return file;
           return _BlockingDeleteFile(file, deleteStarted, releaseDelete);
+        },
+        createDirectory: (directoryPath) {
+          if (watchReplacementIo && !replacementIoStarted.isCompleted) {
+            replacementIoStarted.complete();
+          }
+          return Zone.root.run(() => io.Directory(directoryPath));
         },
       );
 

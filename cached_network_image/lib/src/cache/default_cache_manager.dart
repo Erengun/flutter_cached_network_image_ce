@@ -957,11 +957,26 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<bool> _evictEntry(MapEntry<String, CacheEntryMetadata> entry) async {
     if (!_cleanup.beginEviction(entry.key)) return false;
     try {
-      final file = io.File(_cacheFilePath(entry.value.relativePath));
+      final box = _cacheBox;
+      if (box == null || !box.isOpen) return false;
+      final raw = box.get(entry.key);
+      if (raw == null) return false;
+      final current = CacheEntryMetadata.fromMap(raw);
+      final candidate = entry.value;
+      if (current.url != candidate.url ||
+          current.relativePath != candidate.relativePath ||
+          current.validTill != candidate.validTill ||
+          current.eTag != candidate.eTag ||
+          current.length != candidate.length ||
+          current.touchedAt != candidate.touchedAt) {
+        return false;
+      }
+
+      final file = io.File(_cacheFilePath(candidate.relativePath));
       if (await file.exists()) {
         await file.delete();
       }
-      await _cacheBox!.delete(entry.key);
+      await box.delete(entry.key);
       return true;
     } finally {
       _cleanup.endEviction(entry.key);

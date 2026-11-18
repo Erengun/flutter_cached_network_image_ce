@@ -137,6 +137,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   Box<Map>? _cacheBox;
   String? _cacheDir;
+  int _metadataPathRevision = 0;
 
   final CleanupCoordinator _cleanup = CleanupCoordinator(
     servedEntryGracePeriod: _kServedEntryGracePeriod,
@@ -234,6 +235,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       );
       _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
     }
+    _metadataPathRevision++;
 
     if (cleanupOnInitialize) {
       unawaited(_scheduleCleanup());
@@ -516,13 +518,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
     final tempFile = io.File(tempFilePath);
     final tempRelativePath = path.relative(tempFilePath, from: _cacheDir!);
-    await _cleanup.beginPathUse(tempRelativePath);
+    final releaseTempPath = await _cleanup.beginPathUse(tempRelativePath);
     var tempPathReserved = true;
     late final io.IOSink sink;
     try {
       sink = tempFile.openWrite();
     } on Object catch (_) {
-      _cleanup.endPathUse(tempRelativePath);
+      releaseTempPath();
       tempPathReserved = false;
       rethrow;
     }
@@ -549,17 +551,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       await sink.close();
       rethrow;
     } finally {
-      if (!downloadFinished && await tempFile.exists()) {
-        await tempFile.delete();
-      }
       if (!downloadFinished) {
-        _cleanup.endPathUse(tempRelativePath);
-        tempPathReserved = false;
+        try {
+          if (await tempFile.exists()) await tempFile.delete();
+        } finally {
+          releaseTempPath();
+          tempPathReserved = false;
+        }
       }
     }
 
-    await _cleanup.beginStore(sanitizedKey);
-    await _cleanup.beginPathUse(relativePath);
+    final releaseStore = await _cleanup.beginStore(
+      sanitizedKey,
+      path: relativePath,
+    );
+    final releaseFinalPath = await _cleanup.beginPathUse(relativePath);
     late final String deliveryPath;
     late final DateTime validTill;
     var movedToFinalPath = false;
@@ -570,13 +576,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         movedToFinalPath = true;
       } on Object catch (_) {
         io.File? backupFile;
-        String? backupRelativePath;
+        CleanupLease? backupPathRelease;
         try {
           if (await finalFile.exists()) {
             final backupPath =
                 '$filePath.${DateTime.now().microsecondsSinceEpoch}.bak';
-            backupRelativePath = path.relative(backupPath, from: _cacheDir!);
-            await _cleanup.beginPathUse(backupRelativePath);
+            final backupRelativePath =
+                path.relative(backupPath, from: _cacheDir!);
+            backupPathRelease = await _cleanup.beginPathUse(backupRelativePath);
             backupFile = await finalFile.rename(backupPath);
           }
 
@@ -591,7 +598,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           }
           rethrow;
         } finally {
-          if (backupFile != null && await backupFile.exists()) {
+          if (movedToFinalPath &&
+              backupFile != null &&
+              await backupFile.exists()) {
             try {
               await backupFile.delete();
             } on Object catch (e) {
@@ -601,9 +610,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
               );
             }
           }
-          if (backupRelativePath != null) {
-            _cleanup.endPathUse(backupRelativePath);
-          }
+          backupPathRelease?.call();
         }
       }
 
@@ -631,6 +638,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       );
       if (storeOutcome) {
         await _cacheBox!.put(sanitizedKey, metadata.toMap());
+        _metadataPathRevision++;
         _scheduleCapacityCleanup();
         deliveryPath = filePath;
       } else {
@@ -646,12 +654,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
       _markServed(sanitizedKey);
     } finally {
-      _cleanup.endPathUse(relativePath);
-      _cleanup.endStore(sanitizedKey);
-      if (!movedToFinalPath && await tempFile.exists()) {
-        await tempFile.delete();
+      releaseFinalPath();
+      releaseStore();
+      try {
+        if (!movedToFinalPath && await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      } finally {
+        if (tempPathReserved) releaseTempPath();
       }
-      if (tempPathReserved) _cleanup.endPathUse(tempRelativePath);
     }
 
     final localFile = const LocalFileSystem().file(deliveryPath);
@@ -666,20 +677,22 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     final sanitizedKey = _sanitizeBoxKey(key);
-    if (_cleanup.isEvicting(sanitizedKey) || _cleanup.isStoring(sanitizedKey)) {
-      return null;
-    }
+    if (_cleanup.isEvicting(sanitizedKey)) return null;
 
     final raw = _cacheBox!.get(sanitizedKey);
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
+    if (_cleanup.isStoring(sanitizedKey, path: metadata.relativePath)) {
+      return null;
+    }
 
     final filePath = _cacheFilePath(metadata.relativePath);
     final file = io.File(filePath);
     if (!file.existsSync()) {
       // Metadata exists but file is missing, clean up
       await _cacheBox!.delete(sanitizedKey);
+      _metadataPathRevision++;
       return null;
     }
 
@@ -747,9 +760,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     key ??= url;
     final sanitizedKey = _sanitizeBoxKey(key);
-    await _cleanup.beginStore(sanitizedKey);
     final relativePath = _generateRelativePath(key, fileExtension);
-    await _cleanup.beginPathUse(relativePath);
+    final releaseStore = await _cleanup.beginStore(
+      sanitizedKey,
+      path: relativePath,
+    );
+    final releasePath = await _cleanup.beginPathUse(relativePath);
     try {
       final filePath = _cacheFilePath(relativePath);
 
@@ -769,14 +785,15 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
             length: fileBytes.length,
             touchedAt: clock.now(),
           ).toMap());
+      _metadataPathRevision++;
 
       _markServed(sanitizedKey);
       _scheduleCapacityCleanup();
 
       return const LocalFileSystem().file(filePath);
     } finally {
-      _cleanup.endPathUse(relativePath);
-      _cleanup.endStore(sanitizedKey);
+      releasePath();
+      releaseStore();
     }
   }
 
@@ -792,6 +809,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         await file.delete();
       }
       await _cacheBox!.delete(_sanitizeBoxKey(key));
+      _metadataPathRevision++;
     }
   }
 
@@ -812,6 +830,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
 
     await _cacheBox!.clear();
+    _metadataPathRevision++;
   }
 
   /// Returns the total size in bytes of the images stored in the disk cache.
@@ -844,6 +863,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   @override
   Future<void> dispose() async {
+    _cleanup.capacityCleanupEnabled = false;
+    _cleanup.cancelCapacityRetry();
     final inFlightInit = _initCompleter;
     if (inFlightInit != null) {
       try {
@@ -945,9 +966,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
         }
       }
+      final pathSnapshotRevision = _metadataPathRevision;
 
       await _deleteOrphanedCacheFiles(
         entries.map((entry) => entry.value.relativePath).toSet(),
+        pathSnapshotRevision,
         now,
       );
 
@@ -992,6 +1015,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         await file.delete();
       }
       await box.delete(entry.key);
+      _metadataPathRevision++;
       return _EvictionResult.removed;
     } finally {
       if (pathClaimed) _cleanup.endPathDeletion(entry.value.relativePath);
@@ -1003,7 +1027,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     while (true) {
       final box = _cacheBox;
       if (box == null || !box.isOpen) return;
-      if (box.length <= maxNrOfCacheObjects) return;
+      if (box.length <= maxNrOfCacheObjects) {
+        _cleanup.cancelCapacityRetry();
+        return;
+      }
 
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
       for (final key in box.keys.toList()) {
@@ -1012,25 +1039,34 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
         }
       }
-      var remaining = entries.length - maxNrOfCacheObjects;
-      if (remaining <= 0) return;
-
       final candidates = _cleanupStrategy.sortForEviction(entries);
       var refresh = false;
+      var skippedProtectedEntry = false;
       for (final candidate in candidates) {
-        if (remaining == 0) return;
-        if (_cleanup.protects(candidate.key)) continue;
+        if (box.length <= maxNrOfCacheObjects) {
+          _cleanup.cancelCapacityRetry();
+          return;
+        }
+        if (_cleanup.protects(candidate.key)) {
+          skippedProtectedEntry = true;
+          continue;
+        }
 
         final result = await _evictEntry(candidate);
-        if (result == _EvictionResult.removed) {
-          remaining--;
-        } else if (result == _EvictionResult.changed &&
+        if (result == _EvictionResult.changed &&
             !_cleanup.protects(candidate.key)) {
           refresh = true;
           break;
         }
       }
-      if (!refresh) return;
+      if (refresh) continue;
+      if (box.length > maxNrOfCacheObjects && skippedProtectedEntry) {
+        _cleanup.scheduleCapacityRetry(
+          clock.now(),
+          () => _scheduleCleanup(capacity: true),
+        );
+      }
+      return;
     }
   }
 
@@ -1044,22 +1080,29 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   Future<void> _deleteOrphanedCacheFiles(
     Set<String> knownRelativePaths,
+    int knownPathsRevision,
     DateTime now,
   ) async {
     final cacheDir = io.Directory(_cacheDir!);
     if (!await cacheDir.exists()) return;
 
+    var liveRelativePaths = knownRelativePaths;
+    var livePathsRevision = knownPathsRevision;
     await for (final entity in cacheDir.list()) {
       if (entity is! io.File) continue;
 
       final relativePath = path.relative(entity.path, from: _cacheDir!);
-      if (knownRelativePaths.contains(relativePath)) continue;
+      if (liveRelativePaths.contains(relativePath)) continue;
       if (!_cleanup.beginPathDeletion(relativePath)) continue;
 
       try {
         final stat = await entity.stat();
         if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
-        if (_isTrackedPath(relativePath)) continue;
+        if (livePathsRevision != _metadataPathRevision) {
+          liveRelativePaths = _currentTrackedPaths();
+          livePathsRevision = _metadataPathRevision;
+        }
+        if (liveRelativePaths.contains(relativePath)) continue;
         await entity.delete();
       } on Object catch (e) {
         cacheLogger.log(
@@ -1073,15 +1116,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
   }
 
-  bool _isTrackedPath(String relativePath) {
+  Set<String> _currentTrackedPaths() {
     final box = _cacheBox;
-    if (box == null || !box.isOpen) return false;
+    if (box == null || !box.isOpen) return const {};
+    final relativePaths = <String>{};
     for (final raw in box.values) {
-      if (CacheEntryMetadata.fromMap(raw).relativePath == relativePath) {
-        return true;
-      }
+      relativePaths.add(CacheEntryMetadata.fromMap(raw).relativePath);
     }
-    return false;
+    return relativePaths;
   }
 
   // ---- ImageCacheManager mixin implementation ----

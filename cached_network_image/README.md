@@ -191,7 +191,10 @@ await cacheManager.startCleanup();
 are opt-in: `startCleanup()` enables them for the manager's remaining lifetime
 and waits for one sweep. Concurrent calls share an in-flight sweep. Once
 enabled, stores that exceed `maxNrOfCacheObjects` schedule one coalesced
-background sweep. Capacity eviction follows the configured `cleanupStrategy`.
+background sweep. Entries handed to callers remain protected for 30 seconds;
+if that temporarily prevents enough evictions, one retry is scheduled for the
+earliest protection expiry. Capacity eviction follows the configured
+`cleanupStrategy`.
 
 When `maxIdleDuration` is omitted, cleanup retains the existing behavior and
 removes entries whose `validTill` is in the past. With idle retention enabled,

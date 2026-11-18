@@ -1,5 +1,7 @@
 import 'dart:async';
 
+typedef CleanupLease = void Function();
+
 /// Coordinates cleanup sweeps and protects entries recently handed to callers.
 final class CleanupCoordinator {
   CleanupCoordinator({
@@ -11,11 +13,13 @@ final class CleanupCoordinator {
   final int servedEntryPruneThreshold;
 
   final Map<String, DateTime> _recentlyServed = {};
-  final Map<String, int> _pendingStores = {};
+  final Map<String, Map<Object, String?>> _pendingStores = {};
   final Map<String, Completer<void>> _evictions = {};
-  final Map<String, int> _activePaths = {};
+  final Map<String, Set<Object>> _activePaths = {};
   final Map<String, Completer<void>> _pathDeletions = {};
   Future<void>? _cleanupFuture;
+  Timer? _capacityRetryTimer;
+  DateTime? _capacityRetryAt;
   bool _capacityCleanupPending = false;
 
   bool capacityCleanupEnabled = false;
@@ -40,26 +44,30 @@ final class CleanupCoordinator {
   bool protects(String key) =>
       _recentlyServed.containsKey(key) || _pendingStores.containsKey(key);
 
-  bool isStoring(String key) => _pendingStores.containsKey(key);
+  bool isStoring(String key, {String? path}) {
+    final stores = _pendingStores[key];
+    if (stores == null) return false;
+    if (path == null) return true;
+    return stores.values.any((target) => target == null || target == path);
+  }
 
-  Future<void> beginStore(String key) async {
+  Future<CleanupLease> beginStore(String key, {String? path}) async {
+    final token = Object();
     while (true) {
       final eviction = _evictions[key];
       if (eviction == null) {
-        _pendingStores.update(key, (count) => count + 1, ifAbsent: () => 1);
-        return;
+        _pendingStores.putIfAbsent(key, () => {})[token] = path;
+        return () => _releaseStore(key, token);
       }
       await eviction.future;
     }
   }
 
-  void endStore(String key) {
-    final count = _pendingStores[key];
-    if (count == null || count == 1) {
-      _pendingStores.remove(key);
-    } else {
-      _pendingStores[key] = count - 1;
-    }
+  void _releaseStore(String key, Object token) {
+    final stores = _pendingStores[key];
+    if (stores == null) return;
+    stores.remove(token);
+    if (stores.isEmpty) _pendingStores.remove(key);
   }
 
   bool beginEviction(String key) {
@@ -75,24 +83,23 @@ final class CleanupCoordinator {
     if (eviction != null && !eviction.isCompleted) eviction.complete();
   }
 
-  Future<void> beginPathUse(String path) async {
+  Future<CleanupLease> beginPathUse(String path) async {
+    final token = Object();
     while (true) {
       final deletion = _pathDeletions[path];
       if (deletion == null) {
-        _activePaths.update(path, (count) => count + 1, ifAbsent: () => 1);
-        return;
+        _activePaths.putIfAbsent(path, () => {}).add(token);
+        return () => _releasePath(path, token);
       }
       await deletion.future;
     }
   }
 
-  void endPathUse(String path) {
-    final count = _activePaths[path];
-    if (count == null || count == 1) {
-      _activePaths.remove(path);
-    } else {
-      _activePaths[path] = count - 1;
-    }
+  void _releasePath(String path, Object token) {
+    final users = _activePaths[path];
+    if (users == null) return;
+    users.remove(token);
+    if (users.isEmpty) _activePaths.remove(path);
   }
 
   bool beginPathDeletion(String path) {
@@ -106,6 +113,35 @@ final class CleanupCoordinator {
   void endPathDeletion(String path) {
     final deletion = _pathDeletions.remove(path);
     if (deletion != null && !deletion.isCompleted) deletion.complete();
+  }
+
+  void scheduleCapacityRetry(
+    DateTime now,
+    Future<void> Function() retry,
+  ) {
+    if (!capacityCleanupEnabled || _recentlyServed.isEmpty) return;
+    final retryAt = _recentlyServed.values
+        .map((servedAt) => servedAt.add(servedEntryGracePeriod))
+        .reduce((a, b) => a.isBefore(b) ? a : b);
+    if (_capacityRetryAt case final scheduled?
+        when !retryAt.isBefore(scheduled)) {
+      return;
+    }
+
+    _capacityRetryTimer?.cancel();
+    _capacityRetryAt = retryAt;
+    final delay = retryAt.difference(now);
+    _capacityRetryTimer = Timer(delay.isNegative ? Duration.zero : delay, () {
+      _capacityRetryTimer = null;
+      _capacityRetryAt = null;
+      unawaited(retry());
+    });
+  }
+
+  void cancelCapacityRetry() {
+    _capacityRetryTimer?.cancel();
+    _capacityRetryTimer = null;
+    _capacityRetryAt = null;
   }
 
   Future<void> schedule(
@@ -139,9 +175,9 @@ final class CleanupCoordinator {
     capacityCleanupEnabled = false;
     _capacityCleanupPending = false;
     _cleanupFuture = null;
+    cancelCapacityRetry();
     _recentlyServed.clear();
-    _pendingStores.clear();
-    _activePaths.clear();
+    // Active leases survive manager reuse and release only their own token.
     for (final eviction in _evictions.values) {
       if (!eviction.isCompleted) eviction.complete();
     }

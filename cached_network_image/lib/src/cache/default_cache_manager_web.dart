@@ -322,7 +322,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final relativePath =
           '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
       final sanitizedKey = _sanitizeBoxKey(key);
-      await _cleanup.beginStore(sanitizedKey);
+      final releaseStore = await _cleanup.beginStore(sanitizedKey);
       try {
         await _metaBox!.put(
           sanitizedKey,
@@ -342,7 +342,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         final file = _bytesToFile(relativePath, allBytes);
         yield FileInfo(file, FileSource.Online, validTill, url);
       } finally {
-        _cleanup.endStore(sanitizedKey);
+        releaseStore();
       }
     } finally {
       clientResponse?.release();
@@ -403,7 +403,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
     final validTill = clock.now().add(maxAge);
     final sanitizedKey = _sanitizeBoxKey(key);
-    await _cleanup.beginStore(sanitizedKey);
+    final releaseStore = await _cleanup.beginStore(sanitizedKey);
     try {
       await _metaBox!.put(
         sanitizedKey,
@@ -422,7 +422,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       return _bytesToFile(relativePath, fileBytes);
     } finally {
-      _cleanup.endStore(sanitizedKey);
+      releaseStore();
     }
   }
 
@@ -493,6 +493,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   @override
   Future<void> dispose() async {
+    _cleanup.capacityCleanupEnabled = false;
+    _cleanup.cancelCapacityRetry();
     final inFlightInit = _initCompleter;
     if (inFlightInit != null) {
       try {
@@ -646,13 +648,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       if (!_sameMetadata(current, entry.value)) return _EvictionResult.changed;
 
       await _dataBox!.delete(entry.key);
-      await box.delete(entry.key);
       try {
         final file = _memFs.file('/${entry.value.relativePath}');
         if (file.existsSync()) {
           await file.delete();
         }
       } on Object catch (_) {}
+      await box.delete(entry.key);
       return _EvictionResult.removed;
     } finally {
       _cleanup.endEviction(entry.key);
@@ -663,7 +665,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     while (true) {
       final box = _metaBox;
       if (box == null || !box.isOpen) return;
-      if (box.length <= maxNrOfCacheObjects) return;
+      if (box.length <= maxNrOfCacheObjects) {
+        _cleanup.cancelCapacityRetry();
+        return;
+      }
 
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
       for (final key in box.keys.toList()) {
@@ -675,25 +680,34 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           ));
         }
       }
-      var remaining = entries.length - maxNrOfCacheObjects;
-      if (remaining <= 0) return;
-
       final candidates = _cleanupStrategy.sortForEviction(entries);
       var refresh = false;
+      var skippedProtectedEntry = false;
       for (final candidate in candidates) {
-        if (remaining == 0) return;
-        if (_cleanup.protects(candidate.key)) continue;
+        if (box.length <= maxNrOfCacheObjects) {
+          _cleanup.cancelCapacityRetry();
+          return;
+        }
+        if (_cleanup.protects(candidate.key)) {
+          skippedProtectedEntry = true;
+          continue;
+        }
 
         final result = await _evictEntry(candidate);
-        if (result == _EvictionResult.removed) {
-          remaining--;
-        } else if (result == _EvictionResult.changed &&
+        if (result == _EvictionResult.changed &&
             !_cleanup.protects(candidate.key)) {
           refresh = true;
           break;
         }
       }
-      if (!refresh) return;
+      if (refresh) continue;
+      if (box.length > maxNrOfCacheObjects && skippedProtectedEntry) {
+        _cleanup.scheduleCapacityRetry(
+          clock.now(),
+          () => _scheduleCleanup(capacity: true),
+        );
+      }
+      return;
     }
   }
 

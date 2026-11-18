@@ -20,6 +20,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
+import 'package:path/path.dart' as path;
 
 import 'fake_cache_manager.dart';
 import 'image_data.dart';
@@ -2396,6 +2397,50 @@ void main() {
       expect(await cached!.file.readAsBytes(), [2]);
     });
 
+    test('pending refresh keeps a committed file at a different path readable',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('refresh_old_path_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final storeGate = _BlockingStoreInterceptor();
+      addTearDown(storeGate.release);
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        cacheInterceptors: [storeGate],
+        httpClientFactory: () => http_testing.MockClient(
+          (_) async => http.Response.bytes([2], 200),
+        ),
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+      const url = 'https://example.com/refresh.bin';
+      await manager.putFile(
+        url,
+        [1],
+        key: 'refresh',
+        fileExtension: 'file',
+        maxAge: Duration.zero,
+      );
+
+      final responses = manager.getFileStream(url, key: 'refresh').toList();
+      await storeGate.entered.future;
+      final committed = await manager.getFileFromCache('refresh');
+      expect(await committed!.file.readAsBytes(), [1]);
+
+      storeGate.release();
+      final online = (await responses)
+          .whereType<FileInfo>()
+          .lastWhere((info) => info.source == FileSource.Online);
+      expect(await online.file.readAsBytes(), [2]);
+    });
+
     test('orphan cleanup preserves a cache-miss file while store is pending',
         () async {
       final dir = io.Directory.systemTemp.createTempSync('pending_orphan_');
@@ -2469,7 +2514,7 @@ void main() {
       addTearDown(() {
         if (!releaseScan.isCompleted) releaseScan.complete();
       });
-      final cachePath = '${dir.path}/cached_network_image_ce';
+      final cachePath = path.join(dir.path, 'cached_network_image_ce');
       final createdAt = DateTime.utc(2026, 1, 1);
 
       await withClock(Clock.fixed(createdAt), () async {
@@ -2483,13 +2528,16 @@ void main() {
         () => withClock(
           Clock.fixed(createdAt.add(const Duration(seconds: 31))),
           () async {
-            final cleanup = manager.startCleanup();
+            final cleanup = manager.debugRunCleanup();
             await scanStarted.future;
-            await manager.putFile(
+            final newFile = await manager.putFile(
               'https://example.com/new.bin',
               [3],
               key: 'new',
               fileExtension: 'bin',
+            );
+            newFile.setLastModifiedSync(
+              createdAt.subtract(const Duration(minutes: 10)),
             );
             releaseScan.complete();
             await cleanup;
@@ -2588,6 +2636,65 @@ void main() {
       expect(await manager.getFileFromCache('a'), isNull);
       expect(await manager.getFileFromCache('b'), isNull);
       expect(await manager.getFileFromCache('c'), isNotNull);
+    });
+
+    test('capacity cleanup stops when a concurrent removal reaches the limit',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('capacity_live_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 2,
+      );
+      final deleteStarted = Completer<void>();
+      final releaseDelete = Completer<void>();
+      addTearDown(() async {
+        if (!releaseDelete.isCompleted) releaseDelete.complete();
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+      String? blockedPath;
+      final createdAt = DateTime.utc(2026, 1, 1);
+      await withClock(Clock.fixed(createdAt), () async {
+        for (final key in ['a', 'b', 'c', 'd']) {
+          final file = await manager.putFile(
+            'https://example.com/$key.bin',
+            [key.codeUnitAt(0)],
+            key: key,
+            fileExtension: 'bin',
+          );
+          if (key == 'a') blockedPath = file.path;
+        }
+      });
+
+      await io.IOOverrides.runZoned(
+        () => withClock(
+          Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+          () async {
+            final cleanup = manager.debugRunCleanup();
+            await deleteStarted.future;
+            await manager.removeFile('d');
+            releaseDelete.complete();
+            await cleanup;
+          },
+        ),
+        createFile: (filePath) {
+          final file = Zone.root.run(() => io.File(filePath));
+          if (filePath != blockedPath) return file;
+          return _BlockingDeleteFile(file, deleteStarted, releaseDelete);
+        },
+      );
+
+      expect(await manager.getFileFromCache('a'), isNull);
+      expect(await manager.getFileFromCache('b'), isNotNull);
+      expect(await manager.getFileFromCache('c'), isNotNull);
+      expect(await manager.getFileFromCache('d'), isNull);
     });
 
     test('reads miss and writes wait while an entry is being evicted',

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:cached_network_image_ce/cached_network_image.dart'
     show CleanupStrategy, LruCleanupStrategy;
+import 'package:cached_network_image_ce/src/cache/cleanup_coordinator.dart';
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -388,6 +390,48 @@ void main() {
       expect(await manager.getFileFromCache('new'), isNotNull);
       expect(await manager.getFileFromCache('old'), isNull);
       await manager.dispose();
+    });
+  });
+
+  group('CleanupCoordinator', () {
+    test('old leases cannot release claims acquired after reset', () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(milliseconds: 10),
+        servedEntryPruneThreshold: 64,
+      );
+      final oldPathLease = await coordinator.beginPathUse('same-path');
+      final oldStoreLease =
+          await coordinator.beginStore('same-key', path: 'old-path');
+
+      coordinator.reset();
+      final currentPathLease = await coordinator.beginPathUse('same-path');
+      final currentStoreLease =
+          await coordinator.beginStore('same-key', path: 'new-path');
+      oldPathLease();
+      oldStoreLease();
+
+      expect(coordinator.beginPathDeletion('same-path'), isFalse);
+      expect(coordinator.isStoring('same-key', path: 'new-path'), isTrue);
+      currentPathLease();
+      currentStoreLease();
+      expect(coordinator.beginPathDeletion('same-path'), isTrue);
+      coordinator.endPathDeletion('same-path');
+    });
+
+    test('capacity retry fires once protection can expire', () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(milliseconds: 10),
+        servedEntryPruneThreshold: 64,
+      )..capacityCleanupEnabled = true;
+      final retried = Completer<void>();
+      final now = DateTime.utc(2026, 1, 1);
+      coordinator.markServed('key', now);
+      coordinator.scheduleCapacityRetry(now, () async {
+        if (!retried.isCompleted) retried.complete();
+      });
+
+      await retried.future.timeout(const Duration(seconds: 1));
+      coordinator.reset();
     });
   });
 }

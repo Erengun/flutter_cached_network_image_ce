@@ -521,7 +521,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         : response.stream;
 
     var receivedBytes = 0;
-    var movedToFinalPath = false;
+    var downloadFinished = false;
     try {
       await for (final chunk in stream) {
         receivedBytes += chunk.length;
@@ -532,8 +532,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
       await sink.flush();
       await sink.close();
+      downloadFinished = true;
+    } on Object catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      if (!downloadFinished && await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
 
-      _markServed(sanitizedKey);
+    await _cleanup.beginStore(sanitizedKey);
+    late final String deliveryPath;
+    late final DateTime validTill;
+    var movedToFinalPath = false;
+    try {
       final finalFile = io.File(filePath);
       try {
         await tempFile.rename(filePath);
@@ -570,52 +583,50 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           }
         }
       }
-    } on Object catch (_) {
-      await sink.close();
-      rethrow;
+
+      // Store metadata in Hive
+      validTill = clock.now().add(stalePeriod);
+      final cacheHeaders = response.headers;
+      final eTag = cacheHeaders['etag'];
+
+      final metadata = CacheEntryMetadata(
+        url: url,
+        relativePath: relativePath,
+        validTill: validTill,
+        eTag: eTag,
+        length: receivedBytes,
+        touchedAt: clock.now(),
+      );
+      final storeOutcome = await runOnStoreChain(
+        _cacheInterceptors,
+        CacheStoreData(
+          url: url,
+          key: key,
+          metadata: metadata,
+          file: io.File(filePath),
+        ),
+      );
+      if (storeOutcome) {
+        await _cacheBox!.put(sanitizedKey, metadata.toMap());
+        _scheduleCapacityCleanup();
+        deliveryPath = filePath;
+      } else {
+        // Interceptor rejected storage: copy to a temp file for this delivery,
+        // then delete the cache-directory copy so nothing is orphaned there.
+        final tempPath =
+            '${io.Directory.systemTemp.path}/${path.basename(filePath)}'
+            '.${DateTime.now().microsecondsSinceEpoch}.nocache';
+        await io.File(filePath).copy(tempPath);
+        final f = io.File(filePath);
+        if (await f.exists()) await f.delete();
+        deliveryPath = tempPath;
+      }
+      _markServed(sanitizedKey);
     } finally {
+      _cleanup.endStore(sanitizedKey);
       if (!movedToFinalPath && await tempFile.exists()) {
         await tempFile.delete();
       }
-    }
-
-    // Store metadata in Hive
-    final validTill = clock.now().add(stalePeriod);
-    final cacheHeaders = response.headers;
-    final eTag = cacheHeaders['etag'];
-
-    final metadata = CacheEntryMetadata(
-      url: url,
-      relativePath: relativePath,
-      validTill: validTill,
-      eTag: eTag,
-      length: receivedBytes,
-      touchedAt: clock.now(),
-    );
-    final storeOutcome = await runOnStoreChain(
-      _cacheInterceptors,
-      CacheStoreData(
-        url: url,
-        key: key,
-        metadata: metadata,
-        file: io.File(filePath),
-      ),
-    );
-    final String deliveryPath;
-    if (storeOutcome) {
-      await _cacheBox!.put(sanitizedKey, metadata.toMap());
-      _scheduleCapacityCleanup();
-      deliveryPath = filePath;
-    } else {
-      // Interceptor rejected storage: copy to a temp file for this delivery,
-      // then delete the cache-directory copy so nothing is orphaned there.
-      final tempPath =
-          '${io.Directory.systemTemp.path}/${path.basename(filePath)}'
-          '.${DateTime.now().microsecondsSinceEpoch}.nocache';
-      await io.File(filePath).copy(tempPath);
-      final f = io.File(filePath);
-      if (await f.exists()) await f.delete();
-      deliveryPath = tempPath;
     }
 
     final localFile = const LocalFileSystem().file(deliveryPath);
@@ -629,7 +640,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
+    final sanitizedKey = _sanitizeBoxKey(key);
+    if (_cleanup.isEvicting(sanitizedKey)) return null;
+
+    final raw = _cacheBox!.get(sanitizedKey);
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
@@ -638,12 +652,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final file = io.File(filePath);
     if (!file.existsSync()) {
       // Metadata exists but file is missing, clean up
-      await _cacheBox!.delete(_sanitizeBoxKey(key));
+      await _cacheBox!.delete(sanitizedKey);
       return null;
     }
 
     final localFile = const LocalFileSystem().file(filePath);
-    _markServed(_sanitizeBoxKey(key));
+    _markServed(sanitizedKey);
     unawaited(_touchEntry(key));
     return FileInfo(
         localFile, FileSource.Cache, metadata.validTill, metadata.url);
@@ -706,30 +720,35 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     key ??= url;
     final sanitizedKey = _sanitizeBoxKey(key);
-    _markServed(sanitizedKey);
-    final relativePath = _generateRelativePath(key, fileExtension);
-    final filePath = _cacheFilePath(relativePath);
+    await _cleanup.beginStore(sanitizedKey);
+    try {
+      final relativePath = _generateRelativePath(key, fileExtension);
+      final filePath = _cacheFilePath(relativePath);
 
-    await _ensureCacheDirectoryExists();
+      await _ensureCacheDirectoryExists();
 
-    final file = io.File(filePath);
-    await file.writeAsBytes(fileBytes);
+      final file = io.File(filePath);
+      await file.writeAsBytes(fileBytes);
 
-    final validTill = clock.now().add(maxAge);
-    await _cacheBox!.put(
-        sanitizedKey,
-        CacheEntryMetadata(
-          url: url,
-          relativePath: relativePath,
-          validTill: validTill,
-          eTag: eTag,
-          length: fileBytes.length,
-          touchedAt: clock.now(),
-        ).toMap());
+      final validTill = clock.now().add(maxAge);
+      await _cacheBox!.put(
+          sanitizedKey,
+          CacheEntryMetadata(
+            url: url,
+            relativePath: relativePath,
+            validTill: validTill,
+            eTag: eTag,
+            length: fileBytes.length,
+            touchedAt: clock.now(),
+          ).toMap());
 
-    _scheduleCapacityCleanup();
+      _markServed(sanitizedKey);
+      _scheduleCapacityCleanup();
 
-    return const LocalFileSystem().file(filePath);
+      return const LocalFileSystem().file(filePath);
+    } finally {
+      _cleanup.endStore(sanitizedKey);
+    }
   }
 
   @override
@@ -923,8 +942,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           // Skip rather than stop, so a recently served entry costs the cache
           // its place in the eviction order but not the size budget.
           if (_cleanup.protects(entry.key)) continue;
-          await _evictEntry(entry);
-          removed++;
+          if (await _evictEntry(entry)) removed++;
         }
       }
     } on Object catch (e) {
@@ -936,12 +954,18 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }
 
   /// Deletes the cached file for [entry] and then its metadata record.
-  Future<void> _evictEntry(MapEntry<String, CacheEntryMetadata> entry) async {
-    final file = io.File(_cacheFilePath(entry.value.relativePath));
-    if (await file.exists()) {
-      await file.delete();
+  Future<bool> _evictEntry(MapEntry<String, CacheEntryMetadata> entry) async {
+    if (!_cleanup.beginEviction(entry.key)) return false;
+    try {
+      final file = io.File(_cacheFilePath(entry.value.relativePath));
+      if (await file.exists()) {
+        await file.delete();
+      }
+      await _cacheBox!.delete(entry.key);
+      return true;
+    } finally {
+      _cleanup.endEviction(entry.key);
     }
-    await _cacheBox!.delete(entry.key);
   }
 
   Future<void> _deleteOrphanedCacheFiles(

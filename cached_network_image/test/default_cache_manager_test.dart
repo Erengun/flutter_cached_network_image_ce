@@ -46,6 +46,43 @@ final class _BlockingStoreInterceptor extends CacheInterceptor {
   void release() => _release.complete();
 }
 
+final class _BlockingDeleteFile extends fs
+    .ForwardingFileSystemEntity<fs.File, io.File> with fs.ForwardingFile {
+  _BlockingDeleteFile(
+    this.delegate,
+    this.entered,
+    this.release,
+  );
+
+  @override
+  final io.File delegate;
+
+  final Completer<void> entered;
+  final Completer<void> release;
+
+  @override
+  fs.FileSystem get fileSystem => const LocalFileSystem();
+
+  @override
+  fs.Directory wrapDirectory(io.Directory delegate) =>
+      fileSystem.directory(delegate.path);
+
+  @override
+  fs.File wrapFile(io.File delegate) => fileSystem.file(delegate.path);
+
+  @override
+  fs.Link wrapLink(io.Link delegate) => fileSystem.link(delegate.path);
+
+  @override
+  Future<fs.File> delete({bool recursive = false}) async {
+    if (!entered.isCompleted) entered.complete();
+    await release.future;
+    return wrapFile(
+      await delegate.delete(recursive: recursive) as io.File,
+    );
+  }
+}
+
 /// Runs [onOpen] right before opening the delegate file.
 class _BeforeOpenFile extends fs.ForwardingFileSystemEntity<fs.File, io.File>
     with fs.ForwardingFile {
@@ -2281,12 +2318,14 @@ void main() {
         ),
       );
 
+      var now = createdAt.add(const Duration(seconds: 31));
       await withClock(
-        Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+        Clock(() => now),
         () async {
           final responses =
               manager.getFileStream(url, key: 'replacement').toList();
           await storeGate.entered.future;
+          now = now.add(const Duration(seconds: 31));
           await manager.debugRunCleanup();
           storeGate.release();
 
@@ -2299,6 +2338,80 @@ void main() {
 
       final cached = await manager.getFileFromCache('replacement');
       expect(await cached!.file.readAsBytes(), [2]);
+    });
+
+    test('reads miss and writes wait while an entry is being evicted',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('eviction_guard_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final deleteStarted = Completer<void>();
+      final releaseDelete = Completer<void>();
+      addTearDown(() {
+        if (!releaseDelete.isCompleted) releaseDelete.complete();
+      });
+      String? blockedPath;
+
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+
+      await io.IOOverrides.runZoned(
+        () async {
+          final createdAt = DateTime.utc(2026, 1, 1);
+          final stored = await withClock(
+            Clock.fixed(createdAt),
+            () => manager.putFile(
+              'https://example.com/evicting.bin',
+              [1],
+              key: 'evicting',
+              maxAge: Duration.zero,
+            ),
+          );
+          blockedPath = stored.path;
+
+          await withClock(
+            Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+            () async {
+              final cleanup = manager.debugRunCleanup();
+              await deleteStarted.future;
+
+              expect(await manager.getFileFromCache('evicting'), isNull);
+
+              var writeCompleted = false;
+              final write = manager
+                  .putFile(
+                    'https://example.com/evicting.bin',
+                    [2],
+                    key: 'evicting',
+                  )
+                  .whenComplete(() => writeCompleted = true);
+              await Future<void>.delayed(Duration.zero);
+              expect(writeCompleted, isFalse);
+
+              releaseDelete.complete();
+              await cleanup;
+              expect(await (await write).readAsBytes(), [2]);
+            },
+          );
+        },
+        createFile: (filePath) {
+          final file = Zone.root.run(() => io.File(filePath));
+          if (filePath != blockedPath) return file;
+          return _BlockingDeleteFile(file, deleteStarted, releaseDelete);
+        },
+      );
+
+      expect(await manager.getFileFromCache('evicting'), isNotNull);
     });
 
     test('removes expired entries during initialization', () async {

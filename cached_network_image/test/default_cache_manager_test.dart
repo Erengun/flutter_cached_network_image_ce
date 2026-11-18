@@ -25,6 +25,12 @@ import 'fake_cache_manager.dart';
 import 'image_data.dart';
 import 'support/http_clients.dart';
 
+typedef _FileWriteResult = ({
+  fs.File? file,
+  Object? error,
+  StackTrace? stackTrace,
+});
+
 /// A custom object that forces Hive to write a user-defined typeId into
 /// the box file. When the box is later opened without this adapter
 /// registered, Hive throws [HiveError] with "unknown typeId".
@@ -2638,17 +2644,25 @@ void main() {
                     [2],
                     key: 'evicting',
                   )
-                  .then(
-                    (file) => file,
-                    onError: (Object error, StackTrace stackTrace) =>
-                        Error.throwWithStackTrace(error, stackTrace),
+                  .then<_FileWriteResult>(
+                    (file) => (file: file, error: null, stackTrace: null),
+                    onError: (Object error, StackTrace stackTrace) => (
+                      file: null,
+                      error: error,
+                      stackTrace: stackTrace,
+                    ),
                   );
               await Future<void>.delayed(Duration.zero);
               expect(replacementIoStarted.isCompleted, isFalse);
 
               releaseDelete.complete();
               await cleanup;
-              final replacement = await write;
+              final writeResult = await write;
+              final error = writeResult.error;
+              if (error != null) {
+                Error.throwWithStackTrace(error, writeResult.stackTrace!);
+              }
+              final replacement = writeResult.file!;
               expect(replacementIoStarted.isCompleted, isTrue);
               expect(await replacement.readAsBytes(), [2]);
             },

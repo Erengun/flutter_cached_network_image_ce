@@ -40,6 +40,8 @@ const _kServedEntryPruneThreshold = 64;
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico', 'webp'];
 
+enum _EvictionResult { removed, changed, skipped }
+
 /// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
 String _sanitizeBoxKey(String key) {
   if (key.length <= 255) return key;
@@ -513,7 +515,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final tempFilePath =
         '$filePath.${DateTime.now().microsecondsSinceEpoch}.tmp';
     final tempFile = io.File(tempFilePath);
-    final sink = tempFile.openWrite();
+    final tempRelativePath = path.relative(tempFilePath, from: _cacheDir!);
+    await _cleanup.beginPathUse(tempRelativePath);
+    var tempPathReserved = true;
+    late final io.IOSink sink;
+    try {
+      sink = tempFile.openWrite();
+    } on Object catch (_) {
+      _cleanup.endPathUse(tempRelativePath);
+      tempPathReserved = false;
+      rethrow;
+    }
 
     final requestTimeout = connectionParameters?.requestTimeout;
     final stream = requestTimeout != null
@@ -540,9 +552,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       if (!downloadFinished && await tempFile.exists()) {
         await tempFile.delete();
       }
+      if (!downloadFinished) {
+        _cleanup.endPathUse(tempRelativePath);
+        tempPathReserved = false;
+      }
     }
 
     await _cleanup.beginStore(sanitizedKey);
+    await _cleanup.beginPathUse(relativePath);
     late final String deliveryPath;
     late final DateTime validTill;
     var movedToFinalPath = false;
@@ -553,10 +570,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         movedToFinalPath = true;
       } on Object catch (_) {
         io.File? backupFile;
+        String? backupRelativePath;
         try {
           if (await finalFile.exists()) {
             final backupPath =
                 '$filePath.${DateTime.now().microsecondsSinceEpoch}.bak';
+            backupRelativePath = path.relative(backupPath, from: _cacheDir!);
+            await _cleanup.beginPathUse(backupRelativePath);
             backupFile = await finalFile.rename(backupPath);
           }
 
@@ -570,16 +590,19 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
             await backupFile.rename(filePath);
           }
           rethrow;
-        }
-
-        if (backupFile != null && await backupFile.exists()) {
-          try {
-            await backupFile.delete();
-          } on Object catch (e) {
-            cacheLogger.log(
-              'CacheManager: Failed to delete backup file for $filePath with error:\n$e',
-              CacheManagerLogLevel.warning,
-            );
+        } finally {
+          if (backupFile != null && await backupFile.exists()) {
+            try {
+              await backupFile.delete();
+            } on Object catch (e) {
+              cacheLogger.log(
+                'CacheManager: Failed to delete backup file for $filePath with error:\n$e',
+                CacheManagerLogLevel.warning,
+              );
+            }
+          }
+          if (backupRelativePath != null) {
+            _cleanup.endPathUse(backupRelativePath);
           }
         }
       }
@@ -623,10 +646,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
       _markServed(sanitizedKey);
     } finally {
+      _cleanup.endPathUse(relativePath);
       _cleanup.endStore(sanitizedKey);
       if (!movedToFinalPath && await tempFile.exists()) {
         await tempFile.delete();
       }
+      if (tempPathReserved) _cleanup.endPathUse(tempRelativePath);
     }
 
     final localFile = const LocalFileSystem().file(deliveryPath);
@@ -641,7 +666,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     final sanitizedKey = _sanitizeBoxKey(key);
-    if (_cleanup.isEvicting(sanitizedKey)) return null;
+    if (_cleanup.isEvicting(sanitizedKey) || _cleanup.isStoring(sanitizedKey)) {
+      return null;
+    }
 
     final raw = _cacheBox!.get(sanitizedKey);
     if (raw == null) return null;
@@ -721,8 +748,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final sanitizedKey = _sanitizeBoxKey(key);
     await _cleanup.beginStore(sanitizedKey);
+    final relativePath = _generateRelativePath(key, fileExtension);
+    await _cleanup.beginPathUse(relativePath);
     try {
-      final relativePath = _generateRelativePath(key, fileExtension);
       final filePath = _cacheFilePath(relativePath);
 
       await _ensureCacheDirectoryExists();
@@ -747,6 +775,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       return const LocalFileSystem().file(filePath);
     } finally {
+      _cleanup.endPathUse(relativePath);
       _cleanup.endStore(sanitizedKey);
     }
   }
@@ -929,22 +958,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
       }
 
-      // If cache is still too large, remove oldest entries
-      if (_cacheBox!.length > maxNrOfCacheObjects) {
-        final sortedEntries = _cleanupStrategy.sortForEviction(
-          entries.where((e) => _cacheBox!.containsKey(e.key)).toList(),
-        );
-
-        final toRemove = sortedEntries.length - maxNrOfCacheObjects;
-        var removed = 0;
-        for (final entry in sortedEntries) {
-          if (removed >= toRemove) break;
-          // Skip rather than stop, so a recently served entry costs the cache
-          // its place in the eviction order but not the size budget.
-          if (_cleanup.protects(entry.key)) continue;
-          if (await _evictEntry(entry)) removed++;
-        }
-      }
+      await _evictOverCapacity();
     } on Object catch (e) {
       cacheLogger.log(
         'CacheManager: Error during cleanup: $e',
@@ -954,34 +968,79 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }
 
   /// Deletes the cached file for [entry] and then its metadata record.
-  Future<bool> _evictEntry(MapEntry<String, CacheEntryMetadata> entry) async {
-    if (!_cleanup.beginEviction(entry.key)) return false;
+  Future<_EvictionResult> _evictEntry(
+    MapEntry<String, CacheEntryMetadata> entry,
+  ) async {
+    if (!_cleanup.beginEviction(entry.key)) return _EvictionResult.skipped;
+    var pathClaimed = false;
     try {
       final box = _cacheBox;
-      if (box == null || !box.isOpen) return false;
+      if (box == null || !box.isOpen) return _EvictionResult.skipped;
       final raw = box.get(entry.key);
-      if (raw == null) return false;
+      if (raw == null) return _EvictionResult.changed;
       final current = CacheEntryMetadata.fromMap(raw);
       final candidate = entry.value;
-      if (current.url != candidate.url ||
-          current.relativePath != candidate.relativePath ||
-          current.validTill != candidate.validTill ||
-          current.eTag != candidate.eTag ||
-          current.length != candidate.length ||
-          current.touchedAt != candidate.touchedAt) {
-        return false;
+      if (!_sameMetadata(current, candidate)) return _EvictionResult.changed;
+
+      if (!_cleanup.beginPathDeletion(candidate.relativePath)) {
+        return _EvictionResult.skipped;
       }
+      pathClaimed = true;
 
       final file = io.File(_cacheFilePath(candidate.relativePath));
       if (await file.exists()) {
         await file.delete();
       }
       await box.delete(entry.key);
-      return true;
+      return _EvictionResult.removed;
     } finally {
+      if (pathClaimed) _cleanup.endPathDeletion(entry.value.relativePath);
       _cleanup.endEviction(entry.key);
     }
   }
+
+  Future<void> _evictOverCapacity() async {
+    while (true) {
+      final box = _cacheBox;
+      if (box == null || !box.isOpen) return;
+      if (box.length <= maxNrOfCacheObjects) return;
+
+      final entries = <MapEntry<String, CacheEntryMetadata>>[];
+      for (final key in box.keys.toList()) {
+        final raw = box.get(key);
+        if (raw != null) {
+          entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
+        }
+      }
+      var remaining = entries.length - maxNrOfCacheObjects;
+      if (remaining <= 0) return;
+
+      final candidates = _cleanupStrategy.sortForEviction(entries);
+      var refresh = false;
+      for (final candidate in candidates) {
+        if (remaining == 0) return;
+        if (_cleanup.protects(candidate.key)) continue;
+
+        final result = await _evictEntry(candidate);
+        if (result == _EvictionResult.removed) {
+          remaining--;
+        } else if (result == _EvictionResult.changed &&
+            !_cleanup.protects(candidate.key)) {
+          refresh = true;
+          break;
+        }
+      }
+      if (!refresh) return;
+    }
+  }
+
+  bool _sameMetadata(CacheEntryMetadata a, CacheEntryMetadata b) =>
+      a.url == b.url &&
+      a.relativePath == b.relativePath &&
+      a.validTill == b.validTill &&
+      a.eTag == b.eTag &&
+      a.length == b.length &&
+      a.touchedAt == b.touchedAt;
 
   Future<void> _deleteOrphanedCacheFiles(
     Set<String> knownRelativePaths,
@@ -995,10 +1054,12 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       final relativePath = path.relative(entity.path, from: _cacheDir!);
       if (knownRelativePaths.contains(relativePath)) continue;
+      if (!_cleanup.beginPathDeletion(relativePath)) continue;
 
       try {
         final stat = await entity.stat();
         if (now.difference(stat.modified) < _kOrphanFileGracePeriod) continue;
+        if (_isTrackedPath(relativePath)) continue;
         await entity.delete();
       } on Object catch (e) {
         cacheLogger.log(
@@ -1006,8 +1067,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           '${entity.path}: $e',
           CacheManagerLogLevel.warning,
         );
+      } finally {
+        _cleanup.endPathDeletion(relativePath);
       }
     }
+  }
+
+  bool _isTrackedPath(String relativePath) {
+    final box = _cacheBox;
+    if (box == null || !box.isOpen) return false;
+    for (final raw in box.values) {
+      if (CacheEntryMetadata.fromMap(raw).relativePath == relativePath) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // ---- ImageCacheManager mixin implementation ----

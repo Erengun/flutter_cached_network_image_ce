@@ -27,6 +27,8 @@ const _kDefaultStalePeriod = Duration(days: 7);
 const _kServedEntryGracePeriod = Duration(seconds: 30);
 const _kServedEntryPruneThreshold = 64;
 
+enum _EvictionResult { removed, changed, skipped }
+
 /// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
 String _sanitizeBoxKey(String key) {
   if (key.length <= 255) return key;
@@ -320,24 +322,28 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final relativePath =
           '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
       final sanitizedKey = _sanitizeBoxKey(key);
-      _markServed(sanitizedKey);
+      await _cleanup.beginStore(sanitizedKey);
+      try {
+        await _metaBox!.put(
+          sanitizedKey,
+          CacheEntryMetadata(
+            url: url,
+            relativePath: relativePath,
+            validTill: validTill,
+            eTag: eTag,
+            length: receivedBytes,
+            touchedAt: clock.now(),
+          ).toMap(),
+        );
+        await _dataBox!.put(sanitizedKey, allBytes);
+        _markServed(sanitizedKey);
+        _scheduleCapacityCleanup();
 
-      await _metaBox!.put(
-        sanitizedKey,
-        CacheEntryMetadata(
-          url: url,
-          relativePath: relativePath,
-          validTill: validTill,
-          eTag: eTag,
-          length: receivedBytes,
-          touchedAt: clock.now(),
-        ).toMap(),
-      );
-      await _dataBox!.put(sanitizedKey, allBytes);
-      _scheduleCapacityCleanup();
-
-      final file = _bytesToFile(relativePath, allBytes);
-      yield FileInfo(file, FileSource.Online, validTill, url);
+        final file = _bytesToFile(relativePath, allBytes);
+        yield FileInfo(file, FileSource.Online, validTill, url);
+      } finally {
+        _cleanup.endStore(sanitizedKey);
+      }
     } finally {
       clientResponse?.release();
     }
@@ -351,6 +357,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     final sanitizedKey = _sanitizeBoxKey(key);
+    if (_cleanup.isEvicting(sanitizedKey) || _cleanup.isStoring(sanitizedKey)) {
+      return null;
+    }
 
     final raw = _metaBox!.get(sanitizedKey);
     if (raw == null) return null;
@@ -358,6 +367,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final metadata = CacheEntryMetadata.fromMap(raw);
 
     final bytes = await _dataBox!.get(sanitizedKey);
+    if (_cleanup.isEvicting(sanitizedKey) || _cleanup.isStoring(sanitizedKey)) {
+      return null;
+    }
     if (bytes == null) {
       // Metadata exists but data is missing — clean up.
       await _metaBox!.delete(sanitizedKey);
@@ -391,23 +403,27 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
     final validTill = clock.now().add(maxAge);
     final sanitizedKey = _sanitizeBoxKey(key);
-    _markServed(sanitizedKey);
+    await _cleanup.beginStore(sanitizedKey);
+    try {
+      await _metaBox!.put(
+        sanitizedKey,
+        CacheEntryMetadata(
+          url: url,
+          relativePath: relativePath,
+          validTill: validTill,
+          eTag: eTag,
+          length: fileBytes.length,
+          touchedAt: clock.now(),
+        ).toMap(),
+      );
+      await _dataBox!.put(sanitizedKey, fileBytes);
+      _markServed(sanitizedKey);
+      _scheduleCapacityCleanup();
 
-    await _metaBox!.put(
-      sanitizedKey,
-      CacheEntryMetadata(
-        url: url,
-        relativePath: relativePath,
-        validTill: validTill,
-        eTag: eTag,
-        length: fileBytes.length,
-        touchedAt: clock.now(),
-      ).toMap(),
-    );
-    await _dataBox!.put(sanitizedKey, fileBytes);
-    _scheduleCapacityCleanup();
-
-    return _bytesToFile(relativePath, fileBytes);
+      return _bytesToFile(relativePath, fileBytes);
+    } finally {
+      _cleanup.endStore(sanitizedKey);
+    }
   }
 
   @override
@@ -594,19 +610,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       for (final key in _metaBox!.keys.toList()) {
         final raw = _metaBox!.get(key);
         if (raw != null) {
-          final metadata = CacheEntryMetadata.fromMap(raw);
           entries.add(MapEntry(
             key as String,
-            metadata.touchedAt == null
-                ? CacheEntryMetadata(
-                    url: metadata.url,
-                    relativePath: metadata.relativePath,
-                    validTill: metadata.validTill,
-                    eTag: metadata.eTag,
-                    length: metadata.length,
-                    touchedAt: DateTime.fromMillisecondsSinceEpoch(0),
-                  )
-                : metadata,
+            _legacyAwareMetadata(CacheEntryMetadata.fromMap(raw)),
           ));
         }
       }
@@ -618,21 +624,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
       }
 
-      // If cache is still too large, remove oldest entries.
-      if (_metaBox!.length > maxNrOfCacheObjects) {
-        final sortedEntries = _cleanupStrategy.sortForEviction(
-          entries.where((e) => _metaBox!.containsKey(e.key)).toList(),
-        );
-
-        final toRemove = sortedEntries.length - maxNrOfCacheObjects;
-        var removed = 0;
-        for (final entry in sortedEntries) {
-          if (removed >= toRemove) break;
-          if (_cleanup.protects(entry.key)) continue;
-          await _evictEntry(entry);
-          removed++;
-        }
-      }
+      await _evictOverCapacity();
     } on Object catch (e) {
       cacheLogger.log(
         'CacheManager: Error during cleanup: $e',
@@ -641,18 +633,89 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
   }
 
-  Future<void> _evictEntry(
+  Future<_EvictionResult> _evictEntry(
     MapEntry<String, CacheEntryMetadata> entry,
   ) async {
-    await _metaBox!.delete(entry.key);
-    await _dataBox!.delete(entry.key);
+    if (!_cleanup.beginEviction(entry.key)) return _EvictionResult.skipped;
     try {
-      final file = _memFs.file('/${entry.value.relativePath}');
-      if (file.existsSync()) {
-        await file.delete();
-      }
-    } on Object catch (_) {}
+      final box = _metaBox;
+      if (box == null || !box.isOpen) return _EvictionResult.skipped;
+      final raw = box.get(entry.key);
+      if (raw == null) return _EvictionResult.changed;
+      final current = _legacyAwareMetadata(CacheEntryMetadata.fromMap(raw));
+      if (!_sameMetadata(current, entry.value)) return _EvictionResult.changed;
+
+      await _dataBox!.delete(entry.key);
+      await box.delete(entry.key);
+      try {
+        final file = _memFs.file('/${entry.value.relativePath}');
+        if (file.existsSync()) {
+          await file.delete();
+        }
+      } on Object catch (_) {}
+      return _EvictionResult.removed;
+    } finally {
+      _cleanup.endEviction(entry.key);
+    }
   }
+
+  Future<void> _evictOverCapacity() async {
+    while (true) {
+      final box = _metaBox;
+      if (box == null || !box.isOpen) return;
+      if (box.length <= maxNrOfCacheObjects) return;
+
+      final entries = <MapEntry<String, CacheEntryMetadata>>[];
+      for (final key in box.keys.toList()) {
+        final raw = box.get(key);
+        if (raw != null) {
+          entries.add(MapEntry(
+            key as String,
+            _legacyAwareMetadata(CacheEntryMetadata.fromMap(raw)),
+          ));
+        }
+      }
+      var remaining = entries.length - maxNrOfCacheObjects;
+      if (remaining <= 0) return;
+
+      final candidates = _cleanupStrategy.sortForEviction(entries);
+      var refresh = false;
+      for (final candidate in candidates) {
+        if (remaining == 0) return;
+        if (_cleanup.protects(candidate.key)) continue;
+
+        final result = await _evictEntry(candidate);
+        if (result == _EvictionResult.removed) {
+          remaining--;
+        } else if (result == _EvictionResult.changed &&
+            !_cleanup.protects(candidate.key)) {
+          refresh = true;
+          break;
+        }
+      }
+      if (!refresh) return;
+    }
+  }
+
+  CacheEntryMetadata _legacyAwareMetadata(CacheEntryMetadata metadata) =>
+      metadata.touchedAt == null
+          ? CacheEntryMetadata(
+              url: metadata.url,
+              relativePath: metadata.relativePath,
+              validTill: metadata.validTill,
+              eTag: metadata.eTag,
+              length: metadata.length,
+              touchedAt: DateTime.fromMillisecondsSinceEpoch(0),
+            )
+          : metadata;
+
+  bool _sameMetadata(CacheEntryMetadata a, CacheEntryMetadata b) =>
+      a.url == b.url &&
+      a.relativePath == b.relativePath &&
+      a.validTill == b.validTill &&
+      a.eTag == b.eTag &&
+      a.length == b.length &&
+      a.touchedAt == b.touchedAt;
 
   // ---------------------------------------------------------------
   // ImageCacheManager

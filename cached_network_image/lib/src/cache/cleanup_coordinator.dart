@@ -13,6 +13,8 @@ final class CleanupCoordinator {
   final Map<String, DateTime> _recentlyServed = {};
   final Map<String, int> _pendingStores = {};
   final Map<String, Completer<void>> _evictions = {};
+  final Map<String, int> _activePaths = {};
+  final Map<String, Completer<void>> _pathDeletions = {};
   Future<void>? _cleanupFuture;
   bool _capacityCleanupPending = false;
 
@@ -37,6 +39,8 @@ final class CleanupCoordinator {
 
   bool protects(String key) =>
       _recentlyServed.containsKey(key) || _pendingStores.containsKey(key);
+
+  bool isStoring(String key) => _pendingStores.containsKey(key);
 
   Future<void> beginStore(String key) async {
     while (true) {
@@ -69,6 +73,39 @@ final class CleanupCoordinator {
   void endEviction(String key) {
     final eviction = _evictions.remove(key);
     if (eviction != null && !eviction.isCompleted) eviction.complete();
+  }
+
+  Future<void> beginPathUse(String path) async {
+    while (true) {
+      final deletion = _pathDeletions[path];
+      if (deletion == null) {
+        _activePaths.update(path, (count) => count + 1, ifAbsent: () => 1);
+        return;
+      }
+      await deletion.future;
+    }
+  }
+
+  void endPathUse(String path) {
+    final count = _activePaths[path];
+    if (count == null || count == 1) {
+      _activePaths.remove(path);
+    } else {
+      _activePaths[path] = count - 1;
+    }
+  }
+
+  bool beginPathDeletion(String path) {
+    if (_activePaths.containsKey(path) || _pathDeletions.containsKey(path)) {
+      return false;
+    }
+    _pathDeletions[path] = Completer<void>();
+    return true;
+  }
+
+  void endPathDeletion(String path) {
+    final deletion = _pathDeletions.remove(path);
+    if (deletion != null && !deletion.isCompleted) deletion.complete();
   }
 
   Future<void> schedule(
@@ -104,9 +141,14 @@ final class CleanupCoordinator {
     _cleanupFuture = null;
     _recentlyServed.clear();
     _pendingStores.clear();
+    _activePaths.clear();
     for (final eviction in _evictions.values) {
       if (!eviction.isCompleted) eviction.complete();
     }
     _evictions.clear();
+    for (final deletion in _pathDeletions.values) {
+      if (!deletion.isCompleted) deletion.complete();
+    }
+    _pathDeletions.clear();
   }
 }

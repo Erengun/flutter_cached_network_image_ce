@@ -43,7 +43,9 @@ final class _BlockingStoreInterceptor extends CacheInterceptor {
     _release.future.then((_) => handler.next(data));
   }
 
-  void release() => _release.complete();
+  void release() {
+    if (!_release.isCompleted) _release.complete();
+  }
 }
 
 final class _BlockingDeleteFile extends fs
@@ -80,6 +82,53 @@ final class _BlockingDeleteFile extends fs
     return wrapFile(
       await delegate.delete(recursive: recursive) as io.File,
     );
+  }
+}
+
+final class _BlockingListDirectory
+    extends fs.ForwardingFileSystemEntity<fs.Directory, io.Directory>
+    with fs.ForwardingDirectory {
+  _BlockingListDirectory(this.delegate, this.entered, this.release);
+
+  @override
+  final io.Directory delegate;
+
+  final Completer<void> entered;
+  final Completer<void> release;
+
+  @override
+  fs.FileSystem get fileSystem => const LocalFileSystem();
+
+  @override
+  fs.Directory wrapDirectory(io.Directory delegate) =>
+      fileSystem.directory(delegate.path);
+
+  @override
+  fs.File wrapFile(io.File delegate) => fileSystem.file(delegate.path);
+
+  @override
+  fs.Link wrapLink(io.Link delegate) => fileSystem.link(delegate.path);
+
+  @override
+  fs.Directory childDirectory(String basename) =>
+      fileSystem.directory('${delegate.path}/$basename');
+
+  @override
+  fs.File childFile(String basename) =>
+      fileSystem.file('${delegate.path}/$basename');
+
+  @override
+  fs.Link childLink(String basename) =>
+      fileSystem.link('${delegate.path}/$basename');
+
+  @override
+  Stream<fs.FileSystemEntity> list({
+    bool recursive = false,
+    bool followLinks = true,
+  }) async* {
+    if (!entered.isCompleted) entered.complete();
+    await release.future;
+    yield* super.list(recursive: recursive, followLinks: followLinks);
   }
 }
 
@@ -2314,6 +2363,7 @@ void main() {
           url,
           [1],
           key: 'replacement',
+          fileExtension: 'bin',
           maxAge: Duration.zero,
         ),
       );
@@ -2338,6 +2388,200 @@ void main() {
 
       final cached = await manager.getFileFromCache('replacement');
       expect(await cached!.file.readAsBytes(), [2]);
+    });
+
+    test('orphan cleanup preserves a cache-miss file while store is pending',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('pending_orphan_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final storeGate = _BlockingStoreInterceptor();
+      addTearDown(storeGate.release);
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        cacheInterceptors: [storeGate],
+        httpClientFactory: () => http_testing.MockClient(
+          (_) async => http.Response.bytes([2], 200),
+        ),
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+
+      final now = DateTime.utc(2026, 1, 1);
+      await withClock(Clock.fixed(now), () async {
+        final responses = manager
+            .getFileStream('https://example.com/cache-miss.bin', key: 'miss')
+            .toList();
+        await storeGate.entered.future;
+
+        final cacheDirectory =
+            io.Directory('${dir.path}/cached_network_image_ce');
+        final pendingFile = cacheDirectory
+            .listSync()
+            .whereType<io.File>()
+            .singleWhere((file) => file.path.endsWith('.bin'));
+        pendingFile.setLastModifiedSync(
+          now.subtract(const Duration(minutes: 10)),
+        );
+
+        await manager.debugRunCleanup();
+        expect(pendingFile.existsSync(), isTrue);
+
+        storeGate.release();
+        final online = (await responses).whereType<FileInfo>().last;
+        expect(await online.file.readAsBytes(), [2]);
+      });
+    });
+
+    test('capacity cleanup includes entries stored during the orphan scan',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('capacity_refresh_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 2,
+      );
+      addTearDown(() async {
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+      final scanStarted = Completer<void>();
+      final releaseScan = Completer<void>();
+      addTearDown(() {
+        if (!releaseScan.isCompleted) releaseScan.complete();
+      });
+      final cachePath = '${dir.path}/cached_network_image_ce';
+      final createdAt = DateTime.utc(2026, 1, 1);
+
+      await withClock(Clock.fixed(createdAt), () async {
+        await manager.putFile('https://example.com/old-1.bin', [1],
+            key: 'old-1', fileExtension: 'bin');
+        await manager.putFile('https://example.com/old-2.bin', [2],
+            key: 'old-2', fileExtension: 'bin');
+      });
+
+      await io.IOOverrides.runZoned(
+        () => withClock(
+          Clock.fixed(createdAt.add(const Duration(seconds: 31))),
+          () async {
+            final cleanup = manager.startCleanup();
+            await scanStarted.future;
+            await manager.putFile(
+              'https://example.com/new.bin',
+              [3],
+              key: 'new',
+              fileExtension: 'bin',
+            );
+            releaseScan.complete();
+            await cleanup;
+          },
+        ),
+        createDirectory: (directoryPath) {
+          final directory = Zone.root.run(() => io.Directory(directoryPath));
+          if (directoryPath != cachePath) return directory;
+          return _BlockingListDirectory(
+            directory,
+            scanStarted,
+            releaseScan,
+          );
+        },
+      );
+
+      expect(await manager.getFileFromCache('new'), isNotNull);
+      final oldEntries = [
+        await manager.getFileFromCache('old-1'),
+        await manager.getFileFromCache('old-2'),
+      ];
+      expect(oldEntries.whereType<FileInfo>(), hasLength(1));
+    });
+
+    test('capacity cleanup reorders candidates changed during eviction',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('capacity_reorder_');
+      addTearDown(() {
+        try {
+          dir.deleteSync(recursive: true);
+        } on Object catch (_) {}
+      });
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+        maxNrOfCacheObjects: 66,
+      );
+      final deleteStarted = Completer<void>();
+      final releaseDelete = Completer<void>();
+      addTearDown(() async {
+        if (!releaseDelete.isCompleted) releaseDelete.complete();
+        try {
+          await manager.dispose();
+        } on Object catch (_) {}
+      });
+      final createdAt = DateTime.utc(2026, 1, 1);
+      String? blockedPath;
+
+      await withClock(Clock.fixed(createdAt), () async {
+        blockedPath = (await manager.putFile(
+          'https://example.com/a.bin',
+          [1],
+          key: 'a',
+          fileExtension: 'bin',
+          maxAge: const Duration(hours: 1),
+        ))
+            .path;
+        await manager.putFile('https://example.com/b.bin', [2],
+            key: 'b', fileExtension: 'bin', maxAge: const Duration(hours: 2));
+        await manager.putFile('https://example.com/c.bin', [3],
+            key: 'c', fileExtension: 'bin', maxAge: const Duration(hours: 3));
+        for (var i = 0; i < 65; i++) {
+          await manager.putFile(
+            'https://example.com/extra-$i.bin',
+            [i],
+            key: 'extra-$i',
+            fileExtension: 'bin',
+            maxAge: const Duration(hours: 10),
+          );
+        }
+      });
+
+      var now = createdAt.add(const Duration(seconds: 31));
+      await io.IOOverrides.runZoned(
+        () => withClock(Clock(() => now), () async {
+          final cleanup = manager.startCleanup();
+          await deleteStarted.future;
+
+          expect(await manager.getFileFromCache('b'), isNotNull);
+          now = now.add(const Duration(seconds: 31));
+          for (var i = 0; i < 65; i++) {
+            expect(await manager.getFileFromCache('extra-$i'), isNotNull);
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          releaseDelete.complete();
+          await cleanup;
+        }),
+        createFile: (filePath) {
+          final file = Zone.root.run(() => io.File(filePath));
+          if (filePath != blockedPath) return file;
+          return _BlockingDeleteFile(file, deleteStarted, releaseDelete);
+        },
+      );
+
+      expect(await manager.getFileFromCache('a'), isNull);
+      expect(await manager.getFileFromCache('b'), isNull);
+      expect(await manager.getFileFromCache('c'), isNotNull);
     });
 
     test('reads miss and writes wait while an entry is being evicted',
@@ -2388,18 +2632,25 @@ void main() {
               expect(await manager.getFileFromCache('evicting'), isNull);
 
               watchReplacementIo = true;
-              final write = manager.putFile(
-                'https://example.com/evicting.bin',
-                [2],
-                key: 'evicting',
-              );
+              final write = manager
+                  .putFile(
+                    'https://example.com/evicting.bin',
+                    [2],
+                    key: 'evicting',
+                  )
+                  .then(
+                    (file) => file,
+                    onError: (Object error, StackTrace stackTrace) =>
+                        Error.throwWithStackTrace(error, stackTrace),
+                  );
               await Future<void>.delayed(Duration.zero);
               expect(replacementIoStarted.isCompleted, isFalse);
 
               releaseDelete.complete();
               await cleanup;
-              await replacementIoStarted.future;
-              expect(await (await write).readAsBytes(), [2]);
+              final replacement = await write;
+              expect(replacementIoStarted.isCompleted, isTrue);
+              expect(await replacement.readAsBytes(), [2]);
             },
           );
         },

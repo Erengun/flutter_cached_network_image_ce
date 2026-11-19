@@ -27,8 +27,6 @@ const _kDefaultStalePeriod = Duration(days: 7);
 const _kServedEntryGracePeriod = Duration(seconds: 30);
 const _kServedEntryPruneThreshold = 64;
 
-enum _EvictionResult { removed, changed, skipped }
-
 /// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
 String _sanitizeBoxKey(String key) {
   if (key.length <= 255) return key;
@@ -103,6 +101,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   Box<Map>? _metaBox;
   LazyBox<List<int>>? _dataBox;
+  final _storedVersions = Expando<Object>();
 
   /// Guards [_doInit] so concurrent callers share one init future.
   Completer<void>? _initCompleter;
@@ -321,29 +320,19 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final fileExtension = _getFileExtensionFromUrl(url);
       final relativePath =
           '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
-      final sanitizedKey = _sanitizeBoxKey(key);
-      final releaseStore = await _cleanup.beginStore(sanitizedKey);
-      try {
-        await _metaBox!.put(
-          sanitizedKey,
-          CacheEntryMetadata(
-            url: url,
-            relativePath: relativePath,
-            validTill: validTill,
-            eTag: eTag,
-            length: receivedBytes,
-            touchedAt: clock.now(),
-          ).toMap(),
-        );
-        await _dataBox!.put(sanitizedKey, allBytes);
-        _markServed(sanitizedKey);
-        _scheduleCapacityCleanup();
-
-        final file = _bytesToFile(relativePath, allBytes);
-        yield FileInfo(file, FileSource.Online, validTill, url);
-      } finally {
-        releaseStore();
-      }
+      final file = await _storeFile(
+        _sanitizeBoxKey(key),
+        CacheEntryMetadata(
+          url: url,
+          relativePath: relativePath,
+          validTill: validTill,
+          eTag: eTag,
+          length: receivedBytes,
+          touchedAt: clock.now(),
+        ),
+        allBytes,
+      );
+      yield FileInfo(file, FileSource.Online, validTill, url);
     } finally {
       clientResponse?.release();
     }
@@ -361,18 +350,29 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       return null;
     }
 
-    final raw = _metaBox!.get(sanitizedKey);
+    final metaBox = _metaBox!;
+    final dataBox = _dataBox!;
+    final raw = metaBox.get(sanitizedKey);
     if (raw == null) return null;
 
     final metadata = CacheEntryMetadata.fromMap(raw);
+    final version = _storedVersions[raw] ??= Object();
 
-    final bytes = await _dataBox!.get(sanitizedKey);
-    if (_cleanup.isEvicting(sanitizedKey) || _cleanup.isStoring(sanitizedKey)) {
+    final bytes = await dataBox.get(sanitizedKey);
+    if (!metaBox.isOpen ||
+        _cleanup.isEvicting(sanitizedKey) ||
+        _cleanup.isStoring(sanitizedKey)) {
+      return null;
+    }
+    final current = metaBox.get(sanitizedKey);
+    if (current == null || !identical(version, _storedVersions[current])) {
       return null;
     }
     if (bytes == null) {
-      // Metadata exists but data is missing — clean up.
-      await _metaBox!.delete(sanitizedKey);
+      // The lazy read may have started before a replacement finished.
+      if (!dataBox.containsKey(sanitizedKey)) {
+        await metaBox.delete(sanitizedKey);
+      }
       return null;
     }
 
@@ -401,42 +401,83 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final relativePath =
         '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
-    final validTill = clock.now().add(maxAge);
-    final sanitizedKey = _sanitizeBoxKey(key);
-    final releaseStore = await _cleanup.beginStore(sanitizedKey);
-    try {
-      await _metaBox!.put(
-        sanitizedKey,
-        CacheEntryMetadata(
-          url: url,
-          relativePath: relativePath,
-          validTill: validTill,
-          eTag: eTag,
-          length: fileBytes.length,
-          touchedAt: clock.now(),
-        ).toMap(),
-      );
-      await _dataBox!.put(sanitizedKey, fileBytes);
-      _markServed(sanitizedKey);
-      _scheduleCapacityCleanup();
+    final now = clock.now();
+    return _storeFile(
+      _sanitizeBoxKey(key),
+      CacheEntryMetadata(
+        url: url,
+        relativePath: relativePath,
+        validTill: now.add(maxAge),
+        eTag: eTag,
+        length: fileBytes.length,
+        touchedAt: now,
+      ),
+      fileBytes,
+    );
+  }
 
-      return _bytesToFile(relativePath, fileBytes);
+  Future<File> _storeFile(
+    String key,
+    CacheEntryMetadata metadata,
+    List<int> bytes,
+  ) async {
+    final metaBox = _metaBox!;
+    final dataBox = _dataBox!;
+    final releaseStore = await _cleanup.beginStore(key, exclusive: true);
+    try {
+      await metaBox.put(key, metadata.toMap());
+      try {
+        await dataBox.put(key, bytes);
+      } on Object catch (_) {
+        // A failed overwrite must not pair the new metadata with old bytes.
+        try {
+          await metaBox.delete(key);
+          await dataBox.delete(key);
+        } on Object catch (e) {
+          cacheLogger.log(
+            'CacheManager: Failed to discard incomplete store for $key: $e',
+            CacheManagerLogLevel.warning,
+          );
+        }
+        rethrow;
+      }
+      _markServed(key);
+      return _bytesToFile(metadata.relativePath, bytes);
     } finally {
       releaseStore();
+      _scheduleCapacityCleanup();
     }
   }
 
   @override
   Future<void> removeFile(String key) async {
     await _ensureInitialized();
-    final raw = _metaBox!.get(_sanitizeBoxKey(key));
-    if (raw != null) {
-      final metadata = CacheEntryMetadata.fromMap(raw);
+    final sanitizedKey = _sanitizeBoxKey(key);
+    final metaBox = _metaBox!;
+    final dataBox = _dataBox!;
+    final releaseRemoval =
+        await _cleanup.beginStore(sanitizedKey, exclusive: true);
+    try {
+      final raw = metaBox.get(sanitizedKey);
+      final relativePath =
+          raw == null ? null : CacheEntryMetadata.fromMap(raw).relativePath;
+      await _deleteEntry(metaBox, dataBox, sanitizedKey, relativePath);
+    } finally {
+      releaseRemoval();
+    }
+  }
+
+  Future<void> _deleteEntry(
+    Box<Map> metaBox,
+    LazyBox<List<int>> dataBox,
+    String key,
+    String? relativePath,
+  ) async {
+    await dataBox.delete(key);
+    if (relativePath != null) {
       try {
-        final file = _memFs.file('/${metadata.relativePath}');
-        if (file.existsSync()) {
-          await file.delete();
-        }
+        final file = _memFs.file('/$relativePath');
+        if (file.existsSync()) file.deleteSync();
       } on Object catch (e) {
         cacheLogger.log(
           'CacheManager: Error deleting materialized file for $key: $e',
@@ -444,8 +485,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         );
       }
     }
-    await _metaBox!.delete(_sanitizeBoxKey(key));
-    await _dataBox!.delete(_sanitizeBoxKey(key));
+    await metaBox.delete(key);
   }
 
   @override
@@ -479,8 +519,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final dataBox = _dataBox!;
     var total = 0;
     for (final key in metaBox.keys) {
-      // Metadata is written before the bytes, so a failed bytes write leaves
-      // an entry that getFileFromCache treats as missing.
+      // Ignore incomplete entries without stored bytes.
       if (!dataBox.containsKey(key)) continue;
       try {
         total += CacheEntryMetadata.fromMap(metaBox.get(key)!).length;
@@ -583,17 +622,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final raw = box.get(key);
       if (raw == null) return;
       final current = CacheEntryMetadata.fromMap(raw);
-      await box.put(
-        key,
-        CacheEntryMetadata(
-          url: current.url,
-          relativePath: current.relativePath,
-          validTill: current.validTill,
-          eTag: current.eTag,
-          length: current.length,
-          touchedAt: clock.now(),
-        ).toMap(),
-      );
+      final updated = CacheEntryMetadata(
+        url: current.url,
+        relativePath: current.relativePath,
+        validTill: current.validTill,
+        eTag: current.eTag,
+        length: current.length,
+        touchedAt: clock.now(),
+      ).toMap();
+      // Access-time updates preserve the version of the stored bytes.
+      _storedVersions[updated] = _storedVersions[raw] ??= Object();
+      await box.put(key, updated);
     } on Object catch (e) {
       cacheLogger.log(
         'CacheManager: Failed to update touchedAt for $key: $e',
@@ -607,17 +646,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     try {
       final now = clock.now();
       _cleanup.pruneRecentlyServed(now);
-      final entries = <MapEntry<String, CacheEntryMetadata>>[];
-
-      for (final key in _metaBox!.keys.toList()) {
-        final raw = _metaBox!.get(key);
-        if (raw != null) {
-          entries.add(MapEntry(
-            key as String,
-            _legacyAwareMetadata(CacheEntryMetadata.fromMap(raw)),
-          ));
-        }
-      }
+      final entries = _snapshotEntries();
 
       // Remove expired entries.
       for (final entry in entries) {
@@ -626,7 +655,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         }
       }
 
-      await _evictOverCapacity();
+      await _cleanup.evictOverCapacity(
+        now: clock.now,
+        isOverCapacity: _isOverCapacity,
+        candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
+        evict: _evictEntry,
+        retry: () => _scheduleCleanup(capacity: true),
+      );
     } on Object catch (e) {
       cacheLogger.log(
         'CacheManager: Error during cleanup: $e',
@@ -635,82 +670,36 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     }
   }
 
-  Future<_EvictionResult> _evictEntry(
+  Future<CacheEvictionResult> _evictEntry(
     MapEntry<String, CacheEntryMetadata> entry,
   ) async {
     final releaseEviction = _cleanup.beginEviction(entry.key);
-    if (releaseEviction == null) return _EvictionResult.skipped;
+    if (releaseEviction == null) return CacheEvictionResult.skipped;
     try {
       final box = _metaBox;
-      if (box == null || !box.isOpen) return _EvictionResult.skipped;
+      if (box == null || !box.isOpen) return CacheEvictionResult.skipped;
       final raw = box.get(entry.key);
-      if (raw == null) return _EvictionResult.changed;
+      if (raw == null) return CacheEvictionResult.changed;
       final current = _legacyAwareMetadata(CacheEntryMetadata.fromMap(raw));
-      if (!_sameMetadata(current, entry.value)) return _EvictionResult.changed;
-
-      await _dataBox!.delete(entry.key);
-      try {
-        final file = _memFs.file('/${entry.value.relativePath}');
-        if (file.existsSync()) {
-          await file.delete();
-        }
-      } on Object catch (_) {}
-      await box.delete(entry.key);
-      return _EvictionResult.removed;
+      if (!_sameMetadata(current, entry.value)) {
+        return CacheEvictionResult.changed;
+      }
+      await _deleteEntry(box, _dataBox!, entry.key, current.relativePath);
+      return CacheEvictionResult.removed;
     } finally {
       releaseEviction();
     }
   }
 
-  Future<void> _evictOverCapacity() async {
-    while (true) {
-      final box = _metaBox;
-      if (box == null || !box.isOpen) return;
-      if (box.length <= maxNrOfCacheObjects) {
-        _cleanup.cancelCapacityRetry();
-        return;
-      }
-
-      final entries = <MapEntry<String, CacheEntryMetadata>>[];
-      for (final key in box.keys.toList()) {
-        final raw = box.get(key);
-        if (raw != null) {
-          entries.add(MapEntry(
+  List<MapEntry<String, CacheEntryMetadata>> _snapshotEntries() => [
+        for (final key in _metaBox!.keys)
+          MapEntry(
             key as String,
-            _legacyAwareMetadata(CacheEntryMetadata.fromMap(raw)),
-          ));
-        }
-      }
-      final candidates = _cleanupStrategy.sortForEviction(entries);
-      var refresh = false;
-      var skippedProtectedEntry = false;
-      for (final candidate in candidates) {
-        if (box.length <= maxNrOfCacheObjects) {
-          _cleanup.cancelCapacityRetry();
-          return;
-        }
-        if (_cleanup.protects(candidate.key)) {
-          skippedProtectedEntry = true;
-          continue;
-        }
-
-        final result = await _evictEntry(candidate);
-        if (result == _EvictionResult.changed &&
-            !_cleanup.protects(candidate.key)) {
-          refresh = true;
-          break;
-        }
-      }
-      if (refresh) continue;
-      if (box.length > maxNrOfCacheObjects && skippedProtectedEntry) {
-        _cleanup.scheduleCapacityRetry(
-          clock.now(),
-          () => _scheduleCleanup(capacity: true),
-        );
-      }
-      return;
-    }
-  }
+            _legacyAwareMetadata(
+              CacheEntryMetadata.fromMap(_metaBox!.get(key)!),
+            ),
+          ),
+      ];
 
   CacheEntryMetadata _legacyAwareMetadata(CacheEntryMetadata metadata) =>
       metadata.touchedAt == null

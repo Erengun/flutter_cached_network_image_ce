@@ -1,6 +1,10 @@
 import 'dart:async';
 
+import 'cache_entry_metadata.dart';
+
 typedef CleanupLease = void Function();
+
+enum CacheEvictionResult { removed, changed, skipped }
 
 /// Coordinates cleanup sweeps and protects entries recently handed to callers.
 final class CleanupCoordinator {
@@ -13,7 +17,7 @@ final class CleanupCoordinator {
   final int servedEntryPruneThreshold;
 
   final Map<String, DateTime> _recentlyServed = {};
-  final Map<String, Map<Object, String?>> _pendingStores = {};
+  final Map<String, Map<Completer<void>, String?>> _pendingStores = {};
   final Map<String, Completer<void>> _evictions = {};
   final Map<String, Set<Object>> _activePaths = {};
   final Map<String, Completer<void>> _pathDeletions = {};
@@ -51,23 +55,32 @@ final class CleanupCoordinator {
     return stores.values.any((target) => target == null || target == path);
   }
 
-  Future<CleanupLease> beginStore(String key, {String? path}) async {
-    final token = Object();
+  Future<CleanupLease> beginStore(
+    String key, {
+    String? path,
+    bool exclusive = false,
+  }) async {
     while (true) {
       final eviction = _evictions[key];
-      if (eviction == null) {
-        _pendingStores.putIfAbsent(key, () => {})[token] = path;
-        return () => _releaseStore(key, token);
+      if (eviction != null) {
+        await eviction.future;
+        continue;
       }
-      await eviction.future;
+      final stores = _pendingStores.putIfAbsent(key, () => {});
+      // Web commits metadata and bytes to separate boxes.
+      if (exclusive && stores.isNotEmpty) {
+        await stores.keys.first.future;
+        continue;
+      }
+      final claim = Completer<void>();
+      stores[claim] = path;
+      return () {
+        if (!stores.containsKey(claim)) return;
+        stores.remove(claim);
+        if (stores.isEmpty) _pendingStores.remove(key);
+        claim.complete();
+      };
     }
-  }
-
-  void _releaseStore(String key, Object token) {
-    final stores = _pendingStores[key];
-    if (stores == null) return;
-    stores.remove(token);
-    if (stores.isEmpty) _pendingStores.remove(key);
   }
 
   CleanupLease? beginEviction(String key) {
@@ -144,6 +157,40 @@ final class CleanupCoordinator {
     _capacityRetryAt = null;
   }
 
+  Future<void> evictOverCapacity({
+    required DateTime Function() now,
+    required bool Function() isOverCapacity,
+    required List<MapEntry<String, CacheEntryMetadata>> Function() candidates,
+    required Future<CacheEvictionResult> Function(
+      MapEntry<String, CacheEntryMetadata>,
+    ) evict,
+    required Future<void> Function() retry,
+  }) async {
+    while (isOverCapacity()) {
+      var refresh = false;
+      var skippedProtectedEntry = false;
+      for (final candidate in candidates()) {
+        if (!isOverCapacity()) break;
+        if (protects(candidate.key)) {
+          skippedProtectedEntry = true;
+          continue;
+        }
+        final result = await evict(candidate);
+        if (result == CacheEvictionResult.changed && !protects(candidate.key)) {
+          refresh = true;
+          break;
+        }
+      }
+      if (refresh) continue;
+      if (isOverCapacity() && skippedProtectedEntry) {
+        scheduleCapacityRetry(now(), retry);
+        return;
+      }
+      break;
+    }
+    if (!isOverCapacity()) cancelCapacityRetry();
+  }
+
   Future<void> schedule(
     Future<void> Function() sweep,
     bool Function() isOverCapacity, {
@@ -151,16 +198,22 @@ final class CleanupCoordinator {
   }) {
     final inFlight = _cleanupFuture;
     if (inFlight != null) {
-      if (capacity) _capacityCleanupPending = true;
+      if (capacity && _capacityRetryTimer == null) {
+        _capacityCleanupPending = true;
+      }
       return inFlight;
     }
+    // The retry already covers stores made while candidates are protected.
+    if (capacity && _capacityRetryTimer != null) return Future<void>.value();
 
     late final Future<void> cleanup;
     cleanup = () async {
       do {
         _capacityCleanupPending = false;
         await sweep();
-      } while (_capacityCleanupPending && isOverCapacity());
+      } while (_capacityCleanupPending &&
+          _capacityRetryTimer == null &&
+          isOverCapacity());
     }()
         .whenComplete(() {
       if (identical(_cleanupFuture, cleanup)) {

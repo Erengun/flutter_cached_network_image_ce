@@ -2679,9 +2679,12 @@ void main() {
           () async {
             final cleanup = manager.debugRunCleanup();
             await deleteStarted.future;
+            final removeEvicted = manager.removeFile('a');
+            final removalDone = expectLater(removeEvicted, completes);
             await manager.removeFile('d');
             releaseDelete.complete();
             await cleanup;
+            await removalDone;
           },
         ),
         createFile: (filePath) {

@@ -453,20 +453,59 @@ void main() {
       currentDeletedPathLease();
     });
 
-    test('capacity retry fires once protection can expire', () async {
+    test('capacity requests share the retry while entries are protected',
+        () async {
       final coordinator = CleanupCoordinator(
         servedEntryGracePeriod: const Duration(milliseconds: 10),
         servedEntryPruneThreshold: 64,
       )..capacityCleanupEnabled = true;
       final retried = Completer<void>();
       final now = DateTime.utc(2026, 1, 1);
+      var sweeps = 0;
+      Future<void> sweep() async {
+        sweeps++;
+      }
+
+      bool isOverCapacity() => true;
+
       coordinator.markServed('key', now);
       coordinator.scheduleCapacityRetry(now, () async {
-        if (!retried.isCompleted) retried.complete();
+        await coordinator.schedule(sweep, isOverCapacity, capacity: true);
+        retried.complete();
       });
+      addTearDown(coordinator.reset);
 
+      for (var i = 0; i < 5; i++) {
+        await coordinator.schedule(sweep, isOverCapacity, capacity: true);
+      }
+      expect(sweeps, 0);
       await retried.future.timeout(const Duration(seconds: 1));
-      coordinator.reset();
+      expect(sweeps, 1);
+    });
+
+    test('exclusive stores wait for a pending store on the same key', () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(seconds: 30),
+        servedEntryPruneThreshold: 64,
+      );
+      final first = await coordinator.beginStore('same-key', exclusive: true);
+      var secondAcquired = false;
+      final second =
+          coordinator.beginStore('same-key', exclusive: true).then((release) {
+        secondAcquired = true;
+        return release;
+      });
+      final unrelated =
+          await coordinator.beginStore('other-key', exclusive: true);
+      expect(secondAcquired, isFalse);
+      expect(coordinator.beginEviction('same-key'), isNull);
+
+      first();
+      final releaseSecond = await second;
+      expect(secondAcquired, isTrue);
+      expect(coordinator.beginEviction('same-key'), isNull);
+      releaseSecond();
+      unrelated();
     });
   });
 }

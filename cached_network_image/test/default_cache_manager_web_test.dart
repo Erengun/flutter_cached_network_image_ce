@@ -37,6 +37,57 @@ class _CorruptPayloadAdapter extends TypeAdapter<_CorruptPayload> {
       writer.writeString(obj.data);
 }
 
+final class _WebTestHive extends HiveImpl {
+  final data = _WebTestDataBox();
+
+  @override
+  Future<LazyBox<E>> openLazyBox<E>(
+    String name, {
+    HiveCipher? encryptionCipher,
+    int? keyCrc,
+    KeyComparator? keyComparator,
+    CompactionStrategy? compactionStrategy,
+    bool crashRecovery = true,
+    String? path,
+    String? collection,
+    List<int>? encryptionKey,
+  }) async =>
+      data as LazyBox<E>;
+}
+
+final class _WebTestDataBox extends Fake implements LazyBox<List<int>> {
+  final entries = <dynamic, List<int>>{};
+  Future<void> Function()? beforeReadReturns;
+  Future<void> Function(List<int>)? beforeWrite;
+
+  @override
+  Future<List<int>?> get(dynamic key, {List<int>? defaultValue}) async {
+    final result = entries[key] ?? defaultValue;
+    await beforeReadReturns?.call();
+    return result;
+  }
+
+  @override
+  Future<void> put(dynamic key, List<int> value) async {
+    await beforeWrite?.call(value);
+    entries[key] = value;
+  }
+
+  @override
+  Future<void> delete(dynamic key) async {
+    entries.remove(key);
+  }
+
+  @override
+  bool containsKey(dynamic key) => entries.containsKey(key);
+
+  @override
+  bool get isOpen => true;
+
+  @override
+  Future<void> close() async {}
+}
+
 void main() {
   late io.Directory hiveTempDir;
   late HiveInterface testHive;
@@ -279,6 +330,80 @@ void main() {
           );
 
       expect(await manager.getCacheSize(), 32);
+    });
+  });
+
+  group('WebCacheManager overlapping stores and reads', () {
+    late _WebTestHive hive;
+    late DefaultCacheManager manager;
+    const url = 'https://example.com/replacement.png';
+
+    setUp(() {
+      hive = _WebTestHive()..init(hiveTempDir.path);
+      manager = DefaultCacheManager(
+        hiveInstance: hive,
+        cleanupOnInitialize: false,
+      );
+      addTearDown(manager.dispose);
+    });
+
+    test('same-key stores commit their metadata and bytes in order', () async {
+      final firstWrite = Completer<void>();
+      final finishFirstWrite = Completer<void>();
+      hive.data.beforeWrite = (bytes) async {
+        if (bytes.length == 1) {
+          firstWrite.complete();
+          await finishFirstWrite.future;
+        }
+      };
+      final first = manager.putFile(url, [1], maxAge: const Duration(days: 1));
+      await firstWrite.future;
+      final second = manager.putFile(url, [2, 3]);
+      try {
+        await Future<void>.delayed(Duration.zero);
+        expect(hive.data.entries, isEmpty);
+        expect(await manager.getFileFromCache(url), isNull);
+      } finally {
+        finishFirstWrite.complete();
+      }
+      await Future.wait([first, second]);
+
+      expect(await (await manager.getFileFromCache(url))!.file.readAsBytes(),
+          [2, 3]);
+      expect(await manager.getCacheSize(), 2);
+    });
+
+    test('a read spanning an overwrite does not materialize old bytes',
+        () async {
+      await withClock(Clock.fixed(DateTime.utc(2026)), () async {
+        await manager.putFile(url, [1]);
+        final readStarted = Completer<void>();
+        final finishRead = Completer<void>();
+        hive.data.beforeReadReturns = () {
+          readStarted.complete();
+          return finishRead.future;
+        };
+        final read = manager.getFileFromCache(url);
+        await readStarted.future;
+        try {
+          await manager.putFile(url, [2]);
+        } finally {
+          hive.data.beforeReadReturns = null;
+          finishRead.complete();
+        }
+        expect(await read, isNull);
+        expect(await (await manager.getFileFromCache(url))!.file.readAsBytes(),
+            [2]);
+      });
+    });
+
+    test('a failed bytes write discards the incomplete replacement', () async {
+      await manager.putFile(url, [1]);
+      hive.data.beforeWrite =
+          (_) async => throw StateError('bytes write failed');
+      await expectLater(manager.putFile(url, [2, 3]), throwsStateError);
+      expect(await manager.getFileFromCache(url), isNull);
+      expect(await manager.getCacheSize(), 0);
     });
   });
 

@@ -638,7 +638,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<_EvictionResult> _evictEntry(
     MapEntry<String, CacheEntryMetadata> entry,
   ) async {
-    if (!_cleanup.beginEviction(entry.key)) return _EvictionResult.skipped;
+    final releaseEviction = _cleanup.beginEviction(entry.key);
+    if (releaseEviction == null) return _EvictionResult.skipped;
     try {
       final box = _metaBox;
       if (box == null || !box.isOpen) return _EvictionResult.skipped;
@@ -657,7 +658,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       await box.delete(entry.key);
       return _EvictionResult.removed;
     } finally {
-      _cleanup.endEviction(entry.key);
+      releaseEviction();
     }
   }
 

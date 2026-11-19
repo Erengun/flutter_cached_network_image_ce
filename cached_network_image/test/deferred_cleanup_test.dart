@@ -394,7 +394,7 @@ void main() {
   });
 
   group('CleanupCoordinator', () {
-    test('old leases cannot release claims acquired after reset', () async {
+    test('active claims remain isolated across reset', () async {
       final coordinator = CleanupCoordinator(
         servedEntryGracePeriod: const Duration(milliseconds: 10),
         servedEntryPruneThreshold: 64,
@@ -402,20 +402,55 @@ void main() {
       final oldPathLease = await coordinator.beginPathUse('same-path');
       final oldStoreLease =
           await coordinator.beginStore('same-key', path: 'old-path');
+      final oldEvictionLease = coordinator.beginEviction('evicted-key')!;
+      final oldDeletionLease = coordinator.beginPathDeletion('deleted-path')!;
 
       coordinator.reset();
+      var currentPathAcquired = false;
+      final currentPathFuture = () async {
+        final lease = await coordinator.beginPathUse('deleted-path');
+        currentPathAcquired = true;
+        return lease;
+      }();
+      var currentStoreAcquired = false;
+      final currentStoreFuture = () async {
+        final lease = await coordinator.beginStore('evicted-key');
+        currentStoreAcquired = true;
+        return lease;
+      }();
+      await Future<void>.delayed(Duration.zero);
+      expect(currentPathAcquired, isFalse);
+      expect(currentStoreAcquired, isFalse);
+
+      oldDeletionLease();
+      oldEvictionLease();
+      final waitedPathLease = await currentPathFuture;
+      final waitedStoreLease = await currentStoreFuture;
       final currentPathLease = await coordinator.beginPathUse('same-path');
       final currentStoreLease =
           await coordinator.beginStore('same-key', path: 'new-path');
       oldPathLease();
       oldStoreLease();
 
-      expect(coordinator.beginPathDeletion('same-path'), isFalse);
+      expect(coordinator.beginPathDeletion('same-path'), isNull);
       expect(coordinator.isStoring('same-key', path: 'new-path'), isTrue);
       currentPathLease();
       currentStoreLease();
-      expect(coordinator.beginPathDeletion('same-path'), isTrue);
-      coordinator.endPathDeletion('same-path');
+      final currentDeletionLease = coordinator.beginPathDeletion('same-path');
+      expect(currentDeletionLease, isNotNull);
+      currentDeletionLease!();
+      waitedPathLease();
+      waitedStoreLease();
+
+      final currentEvictionLease = coordinator.beginEviction('evicted-key')!;
+      oldEvictionLease();
+      expect(coordinator.isEvicting('evicted-key'), isTrue);
+      currentEvictionLease();
+      final currentDeletedPathLease =
+          coordinator.beginPathDeletion('deleted-path')!;
+      oldDeletionLease();
+      expect(coordinator.beginPathDeletion('deleted-path'), isNull);
+      currentDeletedPathLease();
     });
 
     test('capacity retry fires once protection can expire', () async {

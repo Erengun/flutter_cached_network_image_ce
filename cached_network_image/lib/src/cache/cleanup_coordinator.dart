@@ -70,18 +70,18 @@ final class CleanupCoordinator {
     if (stores.isEmpty) _pendingStores.remove(key);
   }
 
-  bool beginEviction(String key) {
-    if (protects(key) || _evictions.containsKey(key)) return false;
-    _evictions[key] = Completer<void>();
-    return true;
+  CleanupLease? beginEviction(String key) {
+    if (protects(key) || _evictions.containsKey(key)) return null;
+    final eviction = Completer<void>();
+    _evictions[key] = eviction;
+    return () {
+      if (!identical(_evictions[key], eviction)) return;
+      _evictions.remove(key);
+      if (!eviction.isCompleted) eviction.complete();
+    };
   }
 
   bool isEvicting(String key) => _evictions.containsKey(key);
-
-  void endEviction(String key) {
-    final eviction = _evictions.remove(key);
-    if (eviction != null && !eviction.isCompleted) eviction.complete();
-  }
 
   Future<CleanupLease> beginPathUse(String path) async {
     final token = Object();
@@ -102,17 +102,17 @@ final class CleanupCoordinator {
     if (users.isEmpty) _activePaths.remove(path);
   }
 
-  bool beginPathDeletion(String path) {
+  CleanupLease? beginPathDeletion(String path) {
     if (_activePaths.containsKey(path) || _pathDeletions.containsKey(path)) {
-      return false;
+      return null;
     }
-    _pathDeletions[path] = Completer<void>();
-    return true;
-  }
-
-  void endPathDeletion(String path) {
-    final deletion = _pathDeletions.remove(path);
-    if (deletion != null && !deletion.isCompleted) deletion.complete();
+    final deletion = Completer<void>();
+    _pathDeletions[path] = deletion;
+    return () {
+      if (!identical(_pathDeletions[path], deletion)) return;
+      _pathDeletions.remove(path);
+      if (!deletion.isCompleted) deletion.complete();
+    };
   }
 
   void scheduleCapacityRetry(
@@ -177,14 +177,6 @@ final class CleanupCoordinator {
     _cleanupFuture = null;
     cancelCapacityRetry();
     _recentlyServed.clear();
-    // Active leases survive manager reuse and release only their own token.
-    for (final eviction in _evictions.values) {
-      if (!eviction.isCompleted) eviction.complete();
-    }
-    _evictions.clear();
-    for (final deletion in _pathDeletions.values) {
-      if (!deletion.isCompleted) deletion.complete();
-    }
-    _pathDeletions.clear();
+    // Active claims survive manager reuse and release only their own identity.
   }
 }

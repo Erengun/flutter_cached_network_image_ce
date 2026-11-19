@@ -994,8 +994,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<_EvictionResult> _evictEntry(
     MapEntry<String, CacheEntryMetadata> entry,
   ) async {
-    if (!_cleanup.beginEviction(entry.key)) return _EvictionResult.skipped;
-    var pathClaimed = false;
+    final releaseEviction = _cleanup.beginEviction(entry.key);
+    if (releaseEviction == null) return _EvictionResult.skipped;
+    CleanupLease? releasePathDeletion;
     try {
       final box = _cacheBox;
       if (box == null || !box.isOpen) return _EvictionResult.skipped;
@@ -1005,10 +1006,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final candidate = entry.value;
       if (!_sameMetadata(current, candidate)) return _EvictionResult.changed;
 
-      if (!_cleanup.beginPathDeletion(candidate.relativePath)) {
+      releasePathDeletion = _cleanup.beginPathDeletion(candidate.relativePath);
+      if (releasePathDeletion == null) {
         return _EvictionResult.skipped;
       }
-      pathClaimed = true;
 
       final file = io.File(_cacheFilePath(candidate.relativePath));
       if (await file.exists()) {
@@ -1018,8 +1019,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _metadataPathRevision++;
       return _EvictionResult.removed;
     } finally {
-      if (pathClaimed) _cleanup.endPathDeletion(entry.value.relativePath);
-      _cleanup.endEviction(entry.key);
+      releasePathDeletion?.call();
+      releaseEviction();
     }
   }
 
@@ -1093,7 +1094,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
       final relativePath = path.relative(entity.path, from: _cacheDir!);
       if (liveRelativePaths.contains(relativePath)) continue;
-      if (!_cleanup.beginPathDeletion(relativePath)) continue;
+      final releasePathDeletion = _cleanup.beginPathDeletion(relativePath);
+      if (releasePathDeletion == null) continue;
 
       try {
         final stat = await entity.stat();
@@ -1111,7 +1113,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           CacheManagerLogLevel.warning,
         );
       } finally {
-        _cleanup.endPathDeletion(relativePath);
+        releasePathDeletion();
       }
     }
   }

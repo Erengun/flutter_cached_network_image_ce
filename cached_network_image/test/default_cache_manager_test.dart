@@ -142,12 +142,13 @@ final class _BlockingListDirectory
 /// Runs [onOpen] right before opening the delegate file.
 class _BeforeOpenFile extends fs.ForwardingFileSystemEntity<fs.File, io.File>
     with fs.ForwardingFile {
-  _BeforeOpenFile(this.delegate, this.onOpen);
+  _BeforeOpenFile(this.delegate, this.onOpen, {this.beforeAppend});
 
   @override
   final io.File delegate;
 
   final void Function() onOpen;
+  final Future<void> Function()? beforeAppend;
 
   @override
   fs.FileSystem get fileSystem => const LocalFileSystem();
@@ -163,9 +164,32 @@ class _BeforeOpenFile extends fs.ForwardingFileSystemEntity<fs.File, io.File>
   fs.Link wrapLink(io.Link delegate) => fileSystem.link(delegate.path);
 
   @override
-  Future<io.RandomAccessFile> open({io.FileMode mode = io.FileMode.read}) {
+  Future<io.RandomAccessFile> open(
+      {io.FileMode mode = io.FileMode.read}) async {
     onOpen();
-    return delegate.open(mode: mode);
+    final file = await delegate.open(mode: mode);
+    final callback = beforeAppend;
+    return callback != null && mode == io.FileMode.writeOnlyAppend
+        ? _BeforeWriteFile(file, callback)
+        : file;
+  }
+}
+
+final class _BeforeWriteFile with fs.ForwardingRandomAccessFile {
+  _BeforeWriteFile(this.delegate, this.beforeWrite);
+
+  @override
+  final io.RandomAccessFile delegate;
+  final Future<void> Function() beforeWrite;
+
+  @override
+  Future<io.RandomAccessFile> writeFrom(
+    List<int> buffer, [
+    int start = 0,
+    int? end,
+  ]) async {
+    await beforeWrite();
+    return super.writeFrom(buffer, start, end);
   }
 }
 
@@ -2562,6 +2586,77 @@ void main() {
       expect(oldEntries.whereType<FileInfo>(), hasLength(1));
     });
 
+    test(
+        'orphan cleanup keeps a previous file when a metadata write rolls back',
+        () async {
+      final dir = io.Directory.systemTemp.createTempSync('orphan_rollback_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        cleanupOnInitialize: false,
+      );
+      addTearDown(() async {
+        await manager.dispose();
+        dir.deleteSync(recursive: true);
+      });
+      final cachePath = path.join(dir.path, 'cached_network_image_ce');
+      final writeStarted = Completer<void>();
+      final rejectWrite = Completer<void>();
+      final scanStarted = Completer<void>();
+      final releaseScan = Completer<void>();
+      var failNextWrite = false;
+      var pauseScan = false;
+
+      await io.IOOverrides.runZoned(
+        () async {
+          const url = 'https://example.com/rollback';
+          final old = await manager.putFile(url, [1], fileExtension: 'png');
+          old.setLastModifiedSync(
+            DateTime.now().subtract(const Duration(hours: 1)),
+          );
+          failNextWrite = true;
+          final failedWrite = expectLater(
+            manager.putFile(url, [2], fileExtension: 'bin'),
+            throwsStateError,
+          );
+          await writeStarted.future;
+          try {
+            await manager.debugRunCleanup();
+            expect(await old.exists(), isTrue);
+
+            pauseScan = true;
+            final cleanup = manager.debugRunCleanup();
+            await scanStarted.future;
+            rejectWrite.complete();
+            await failedWrite;
+            releaseScan.complete();
+            await cleanup;
+          } finally {
+            if (!rejectWrite.isCompleted) rejectWrite.complete();
+            if (!releaseScan.isCompleted) releaseScan.complete();
+            await failedWrite;
+          }
+          final cached = await manager.getFileFromCache(url);
+          expect(await cached!.file.readAsBytes(), [1]);
+        },
+        createFile: (filePath) {
+          final file = Zone.root.run(() => io.File(filePath));
+          if (path.extension(filePath) != '.hive') return file;
+          return _BeforeOpenFile(file, () {}, beforeAppend: () async {
+            if (!failNextWrite) return;
+            failNextWrite = false;
+            writeStarted.complete();
+            await rejectWrite.future;
+            throw StateError('metadata write failed');
+          });
+        },
+        createDirectory: (directoryPath) {
+          final directory = Zone.root.run(() => io.Directory(directoryPath));
+          if (!pauseScan || directoryPath != cachePath) return directory;
+          return _BlockingListDirectory(directory, scanStarted, releaseScan);
+        },
+      );
+    });
+
     test('capacity cleanup reorders candidates changed during eviction',
         () async {
       final dir = io.Directory.systemTemp.createTempSync('capacity_reorder_');
@@ -2662,12 +2757,13 @@ void main() {
       String? blockedPath;
       final createdAt = DateTime.utc(2026, 1, 1);
       await withClock(Clock.fixed(createdAt), () async {
-        for (final key in ['a', 'b', 'c', 'd']) {
+        for (final (index, key) in ['a', 'b', 'c', 'd'].indexed) {
           final file = await manager.putFile(
             'https://example.com/$key.bin',
             [key.codeUnitAt(0)],
             key: key,
             fileExtension: 'bin',
+            maxAge: Duration(days: index + 1),
           );
           if (key == 'a') blockedPath = file.path;
         }

@@ -348,29 +348,38 @@ void main() {
     });
 
     test('same-key stores commit their metadata and bytes in order', () async {
-      final firstWrite = Completer<void>();
-      final finishFirstWrite = Completer<void>();
-      hive.data.beforeWrite = (bytes) async {
-        if (bytes.length == 1) {
-          firstWrite.complete();
-          await finishFirstWrite.future;
+      var now = DateTime.utc(2026);
+      await withClock(Clock(() => now), () async {
+        final firstWrite = Completer<void>();
+        final finishFirstWrite = Completer<void>();
+        hive.data.beforeWrite = (bytes) async {
+          if (bytes.length == 1) {
+            firstWrite.complete();
+            await finishFirstWrite.future;
+          }
+        };
+        final first =
+            manager.putFile(url, [1], maxAge: const Duration(days: 1));
+        await firstWrite.future;
+        final second = manager.putFile(url, [2, 3]);
+        try {
+          await Future<void>.delayed(Duration.zero);
+          expect(hive.data.entries, isEmpty);
+          expect(await manager.getFileFromCache(url), isNull);
+          now = now.add(const Duration(hours: 2));
+        } finally {
+          finishFirstWrite.complete();
         }
-      };
-      final first = manager.putFile(url, [1], maxAge: const Duration(days: 1));
-      await firstWrite.future;
-      final second = manager.putFile(url, [2, 3]);
-      try {
-        await Future<void>.delayed(Duration.zero);
-        expect(hive.data.entries, isEmpty);
-        expect(await manager.getFileFromCache(url), isNull);
-      } finally {
-        finishFirstWrite.complete();
-      }
-      await Future.wait([first, second]);
+        await Future.wait([first, second]);
 
-      expect(await (await manager.getFileFromCache(url))!.file.readAsBytes(),
-          [2, 3]);
-      expect(await manager.getCacheSize(), 2);
+        final raw = hive.box<Map>('cached_network_image_cache').get(url)!;
+        expect(raw['touchedAt'], now.millisecondsSinceEpoch);
+        expect(
+            raw['validTill'], DateTime.utc(2026, 1, 31).millisecondsSinceEpoch);
+        expect(await (await manager.getFileFromCache(url))!.file.readAsBytes(),
+            [2, 3]);
+        expect(await manager.getCacheSize(), 2);
+      });
     });
 
     test('a read spanning an overwrite does not materialize old bytes',
@@ -398,10 +407,11 @@ void main() {
     });
 
     test('a failed bytes write discards the incomplete replacement', () async {
-      await manager.putFile(url, [1]);
+      final old = await manager.putFile(url, [1]);
       hive.data.beforeWrite =
           (_) async => throw StateError('bytes write failed');
       await expectLater(manager.putFile(url, [2, 3]), throwsStateError);
+      expect(await old.exists(), isFalse);
       expect(await manager.getFileFromCache(url), isNull);
       expect(await manager.getCacheSize(), 0);
     });

@@ -636,8 +636,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         ),
       );
       if (storeOutcome) {
-        await _cacheBox!.put(sanitizedKey, metadata.toMap());
-        _metadataPathRevision++;
+        await _storeMetadata(sanitizedKey, metadata);
         deliveryPath = filePath;
       } else {
         // Interceptor rejected storage: copy to a temp file for this delivery,
@@ -774,7 +773,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       await file.writeAsBytes(fileBytes);
 
       final validTill = clock.now().add(maxAge);
-      await _cacheBox!.put(
+      await _storeMetadata(
           sanitizedKey,
           CacheEntryMetadata(
             url: url,
@@ -783,8 +782,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
             eTag: eTag,
             length: fileBytes.length,
             touchedAt: clock.now(),
-          ).toMap());
-      _metadataPathRevision++;
+          ));
 
       _markServed(sanitizedKey);
 
@@ -793,6 +791,32 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       releasePath();
       releaseStore();
       _scheduleCapacityCleanup();
+    }
+  }
+
+  Future<void> _storeMetadata(String key, CacheEntryMetadata metadata) async {
+    final box = _cacheBox!;
+    CleanupLease? releasePreviousPath;
+    while (true) {
+      final previousPath = box.get(key)?['relativePath'];
+      if (previousPath is! String || previousPath == metadata.relativePath) {
+        break;
+      }
+      final release = await _cleanup.beginPathUse(previousPath);
+      if (box.isOpen && box.get(key)?['relativePath'] == previousPath) {
+        releasePreviousPath = release;
+        break;
+      }
+      release();
+    }
+
+    // Hive exposes pending metadata and can restore the previous map on error.
+    _metadataPathRevision++;
+    try {
+      await box.put(key, metadata.toMap());
+    } finally {
+      _metadataPathRevision++;
+      releasePreviousPath?.call();
     }
   }
 
@@ -815,6 +839,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _metadataPathRevision++;
     } finally {
       releaseRemoval();
+      _scheduleCapacityCleanup();
     }
   }
 

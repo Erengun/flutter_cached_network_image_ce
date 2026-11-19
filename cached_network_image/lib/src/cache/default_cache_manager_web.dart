@@ -328,7 +328,6 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           validTill: validTill,
           eTag: eTag,
           length: receivedBytes,
-          touchedAt: clock.now(),
         ),
         allBytes,
       );
@@ -401,16 +400,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final relativePath =
         '${key.hashCode.toUnsigned(32).toRadixString(16)}.$fileExtension';
-    final now = clock.now();
     return _storeFile(
       _sanitizeBoxKey(key),
       CacheEntryMetadata(
         url: url,
         relativePath: relativePath,
-        validTill: now.add(maxAge),
+        validTill: clock.now().add(maxAge),
         eTag: eTag,
         length: fileBytes.length,
-        touchedAt: now,
       ),
       fileBytes,
     );
@@ -425,19 +422,26 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     final dataBox = _dataBox!;
     final releaseStore = await _cleanup.beginStore(key, exclusive: true);
     try {
-      await metaBox.put(key, metadata.toMap());
+      final previousPath = metaBox.get(key)?['relativePath'];
+      final stored = metadata.toMap()
+        ..['touchedAt'] = clock.now().millisecondsSinceEpoch;
       try {
+        await metaBox.put(key, stored);
         await dataBox.put(key, bytes);
       } on Object catch (_) {
         // A failed overwrite must not pair the new metadata with old bytes.
-        try {
-          await metaBox.delete(key);
-          await dataBox.delete(key);
-        } on Object catch (e) {
-          cacheLogger.log(
-            'CacheManager: Failed to discard incomplete store for $key: $e',
-            CacheManagerLogLevel.warning,
-          );
+        for (final box in <BoxBase<dynamic>>[metaBox, dataBox]) {
+          try {
+            await box.delete(key);
+          } on Object catch (e) {
+            cacheLogger.log(
+              'CacheManager: Failed to discard incomplete store for $key: $e',
+              CacheManagerLogLevel.warning,
+            );
+          }
+        }
+        if (previousPath is String) {
+          _deleteMaterializedFile(key, previousPath);
         }
         rethrow;
       }
@@ -464,6 +468,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       await _deleteEntry(metaBox, dataBox, sanitizedKey, relativePath);
     } finally {
       releaseRemoval();
+      _scheduleCapacityCleanup();
     }
   }
 
@@ -475,17 +480,21 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ) async {
     await dataBox.delete(key);
     if (relativePath != null) {
-      try {
-        final file = _memFs.file('/$relativePath');
-        if (file.existsSync()) file.deleteSync();
-      } on Object catch (e) {
-        cacheLogger.log(
-          'CacheManager: Error deleting materialized file for $key: $e',
-          CacheManagerLogLevel.warning,
-        );
-      }
+      _deleteMaterializedFile(key, relativePath);
     }
     await metaBox.delete(key);
+  }
+
+  void _deleteMaterializedFile(String key, String relativePath) {
+    try {
+      final file = _memFs.file('/$relativePath');
+      if (file.existsSync()) file.deleteSync();
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error deleting materialized file for $key: $e',
+        CacheManagerLogLevel.warning,
+      );
+    }
   }
 
   @override

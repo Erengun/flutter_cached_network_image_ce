@@ -1,3 +1,8 @@
+## Unreleased
+
+* **Feature:** `DefaultCacheManager` now supports access-based retention with `maxIdleDuration`, deferred destructive cleanup with `cleanupOnInitialize: false`, and an idempotent `startCleanup()` gate. Startup cleanup keeps its existing default; runtime capacity sweeps are opt-in through `startCleanup()`. Once enabled, stores above `maxNrOfCacheObjects` schedule a coalesced background sweep, with one retry after temporary handoff protection expires when needed.
+* **Feature:** The web cache manager now records access timestamps and supports the same cleanup strategy, idle-retention, and deferred-cleanup API as native platforms. Legacy web entries without access timestamps are treated as oldest.
+
 ## [4.14.0] - 2026-10-31
 
 * **Feature:** Added `DefaultCacheManager.getCacheSize()`, which returns the total size in bytes of the images stored in the cache, or `0` when the cache is empty. Flutter's in-memory `ImageCache` is not counted. On IO the sizes are read from the files on disk, so files the OS has already removed are not counted. On Web it counts only images cached through the cache manager (`ImageRenderMethodForWeb.HttpGet`). Requested in issue #83.

@@ -1,6 +1,7 @@
 ## [4.14.0] - 2026-10-31
 
 * **Feature:** Added `DefaultCacheManager.getCacheSize()`, which returns the total size in bytes of the images stored in the cache, or `0` when the cache is empty. Flutter's in-memory `ImageCache` is not counted. On IO the sizes are read from the files on disk, so files the OS has already removed are not counted. On Web it counts only images cached through the cache manager (`ImageRenderMethodForWeb.HttpGet`). Requested in issue #83.
+* **Fix:** Single-frame images could report `Decoded image has been disposed` when a listener returned after the last one left during a decode, for example after a cached image was refreshed from the network. `MultiImageStreamCompleter` released the retained frame and asked the codec for it again. The retained frame is now handed to the returning listener, and it is released if a replacement codec arrives first (issue #96).
 
 ## [4.13.2] - 2026-09-26
 

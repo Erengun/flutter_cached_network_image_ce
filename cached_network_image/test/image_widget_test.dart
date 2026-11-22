@@ -1,5 +1,5 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_cache_manager.dart';
@@ -174,7 +174,7 @@ class MyImageWidget extends StatelessWidget {
     if (onProgress == null) return null;
     return (context, url, progress) {
       onProgress();
-      return const CircularProgressIndicator();
+      return const SizedBox();
     };
   }
 
@@ -190,16 +190,17 @@ class MyImageWidget extends StatelessWidget {
     if (onError == null) return null;
     return (context, error, stacktrace) {
       onError();
-      return const Icon(Icons.error);
+      return const Text('error');
     };
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      home: Scaffold(
-        body: Center(
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: MediaQuery(
+        data: const MediaQueryData(),
+        child: Center(
           child: CachedNetworkImage(
             imageUrl: imageUrl,
             cacheManager: cacheManager,

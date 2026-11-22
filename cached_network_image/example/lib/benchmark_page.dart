@@ -2,7 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cached_network_image_ce/cached_network_image.dart' as ce;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart' as original;
 
 class BenchmarkContent extends StatefulWidget {
@@ -54,13 +54,16 @@ class _BenchmarkContentState extends State<BenchmarkContent>
                 itemCount: _results.length,
                 itemBuilder: (context, index) {
                   final r = _results[index];
-                  final speedup =
-                      r.originalMs > 0 ? r.originalMs / r.ceMs : 0.0;
+                  final speedup = r.originalMs > 0
+                      ? r.originalMs / r.ceMs
+                      : 0.0;
                   final speedupColor = speedup > 1 ? Colors.green : Colors.red;
                   return Card(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -69,7 +72,9 @@ class _BenchmarkContentState extends State<BenchmarkContent>
                               Text(
                                 '${r.operation} · ${r.fileSize} · ×${r.count}',
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 13),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
                               ),
                               const Spacer(),
                               Text(
@@ -106,10 +111,14 @@ class _BenchmarkContentState extends State<BenchmarkContent>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('$title: ',
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        Text(value,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+        Text(
+          '$title: ',
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+        ),
       ],
     );
   }
@@ -132,7 +141,8 @@ class _BenchmarkContentState extends State<BenchmarkContent>
 
         // ---- WRITE ----
         setState(
-            () => _status = 'Writing $sizeLabel × $_numEntries (sqflite)...');
+          () => _status = 'Writing $sizeLabel × $_numEntries (sqflite)...',
+        );
         await originalManager.emptyCache();
 
         final originalWriteSw = Stopwatch()..start();
@@ -147,7 +157,8 @@ class _BenchmarkContentState extends State<BenchmarkContent>
         originalWriteSw.stop();
 
         setState(
-            () => _status = 'Writing $sizeLabel × $_numEntries (hive_ce)...');
+          () => _status = 'Writing $sizeLabel × $_numEntries (hive_ce)...',
+        );
         await ceManager.emptyCache();
 
         final ceWriteSw = Stopwatch()..start();
@@ -161,18 +172,21 @@ class _BenchmarkContentState extends State<BenchmarkContent>
         }
         ceWriteSw.stop();
 
-        _results.add(BenchmarkResult(
-          operation: 'Write',
-          fileSize: sizeLabel,
-          count: _numEntries,
-          originalMs: originalWriteSw.elapsedMilliseconds,
-          ceMs: ceWriteSw.elapsedMilliseconds,
-        ));
+        _results.add(
+          BenchmarkResult(
+            operation: 'Write',
+            fileSize: sizeLabel,
+            count: _numEntries,
+            originalMs: originalWriteSw.elapsedMilliseconds,
+            ceMs: ceWriteSw.elapsedMilliseconds,
+          ),
+        );
         setState(() {});
 
         // ---- READ ----
         setState(
-            () => _status = 'Reading $sizeLabel × $_numEntries (sqflite)...');
+          () => _status = 'Reading $sizeLabel × $_numEntries (sqflite)...',
+        );
 
         final originalReadSw = Stopwatch()..start();
         for (var i = 0; i < _numEntries; i++) {
@@ -181,7 +195,8 @@ class _BenchmarkContentState extends State<BenchmarkContent>
         originalReadSw.stop();
 
         setState(
-            () => _status = 'Reading $sizeLabel × $_numEntries (hive_ce)...');
+          () => _status = 'Reading $sizeLabel × $_numEntries (hive_ce)...',
+        );
 
         final ceReadSw = Stopwatch()..start();
         for (var i = 0; i < _numEntries; i++) {
@@ -189,18 +204,21 @@ class _BenchmarkContentState extends State<BenchmarkContent>
         }
         ceReadSw.stop();
 
-        _results.add(BenchmarkResult(
-          operation: 'Read',
-          fileSize: sizeLabel,
-          count: _numEntries,
-          originalMs: originalReadSw.elapsedMilliseconds,
-          ceMs: ceReadSw.elapsedMilliseconds,
-        ));
+        _results.add(
+          BenchmarkResult(
+            operation: 'Read',
+            fileSize: sizeLabel,
+            count: _numEntries,
+            originalMs: originalReadSw.elapsedMilliseconds,
+            ceMs: ceReadSw.elapsedMilliseconds,
+          ),
+        );
         setState(() {});
 
         // ---- DELETE ----
         setState(
-            () => _status = 'Deleting $sizeLabel × $_numEntries (sqflite)...');
+          () => _status = 'Deleting $sizeLabel × $_numEntries (sqflite)...',
+        );
 
         final originalDeleteSw = Stopwatch()..start();
         for (var i = 0; i < _numEntries; i++) {
@@ -209,7 +227,8 @@ class _BenchmarkContentState extends State<BenchmarkContent>
         originalDeleteSw.stop();
 
         setState(
-            () => _status = 'Deleting $sizeLabel × $_numEntries (hive_ce)...');
+          () => _status = 'Deleting $sizeLabel × $_numEntries (hive_ce)...',
+        );
 
         final ceDeleteSw = Stopwatch()..start();
         for (var i = 0; i < _numEntries; i++) {
@@ -217,13 +236,15 @@ class _BenchmarkContentState extends State<BenchmarkContent>
         }
         ceDeleteSw.stop();
 
-        _results.add(BenchmarkResult(
-          operation: 'Delete',
-          fileSize: sizeLabel,
-          count: _numEntries,
-          originalMs: originalDeleteSw.elapsedMilliseconds,
-          ceMs: ceDeleteSw.elapsedMilliseconds,
-        ));
+        _results.add(
+          BenchmarkResult(
+            operation: 'Delete',
+            fileSize: sizeLabel,
+            count: _numEntries,
+            originalMs: originalDeleteSw.elapsedMilliseconds,
+            ceMs: ceDeleteSw.elapsedMilliseconds,
+          ),
+        );
         setState(() {});
       }
 
@@ -254,13 +275,15 @@ class _BenchmarkContentState extends State<BenchmarkContent>
       await ceManager.emptyCache();
       ceEmptySw.stop();
 
-      _results.add(BenchmarkResult(
-        operation: 'Empty Cache',
-        fileSize: '100 KB',
-        count: _numEntries,
-        originalMs: originalEmptySw.elapsedMilliseconds,
-        ceMs: ceEmptySw.elapsedMilliseconds,
-      ));
+      _results.add(
+        BenchmarkResult(
+          operation: 'Empty Cache',
+          fileSize: '100 KB',
+          count: _numEntries,
+          originalMs: originalEmptySw.elapsedMilliseconds,
+          ceMs: ceEmptySw.elapsedMilliseconds,
+        ),
+      );
 
       setState(() {
         _running = false;

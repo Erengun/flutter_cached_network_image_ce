@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -19,10 +19,7 @@ class ExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'CachedNetworkImage CE Demo',
-      theme: ThemeData(
-        colorSchemeSeed: Colors.blue,
-        useMaterial3: true,
-      ),
+      theme: ThemeData(colorSchemeSeed: Colors.blue, useMaterial3: true),
       home: const HomePage(),
     );
   }
@@ -84,10 +81,7 @@ class CacheSizeButton extends StatelessWidget {
       ..showSnackBar(
         SnackBar(
           content: Text('Image cache: $megabytes MB ($bytes bytes)'),
-          action: SnackBarAction(
-            label: 'Clear',
-            onPressed: manager.emptyCache,
-          ),
+          action: SnackBarAction(label: 'Clear', onPressed: manager.emptyCache),
         ),
       );
   }
@@ -122,8 +116,7 @@ class BasicContent extends StatelessWidget {
                     requestTimeout: const Duration(seconds: 30),
                   ),
                 ),
-                imageUrl:
-                    'https://images.unsplash.com/photo-1522205408450-add114ad53fe?ixlib=rb-0.3.5&ixid=eyJhcHBfaWQiOjEyMDd9&s=368f45b0888aeb0b7b08e3a1084d3ede&auto=format&fit=crop&w=1950&q=80',
+                imageUrl: 'https://images.unsplash.com/photo-1522205408450-add114ad53fe?ixlib=rb-0.3.5&ixid=eyJhcHBfaWQiOjEyMDd9&s=368f45b0888aeb0b7b08e3a1084d3ede&auto=format&fit=crop&w=1950&q=80',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
                 errorBuilder: (context, error, stackTrace) =>
@@ -133,15 +126,11 @@ class BasicContent extends StatelessWidget {
             _blurHashImage(),
             _sizedContainer(
               CachedNetworkImage(
-                imageUrl:
-                    'https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg',
+                imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
                 unsupportedImageBuilder: (context, url, bytes) =>
-                    SvgPicture.memory(
-                  bytes,
-                  fit: BoxFit.contain,
-                ),
+                    SvgPicture.memory(bytes, fit: BoxFit.contain),
                 errorBuilder: (context, error, stackTrace) =>
                     const Icon(Icons.error),
               ),
@@ -160,26 +149,21 @@ class BasicContent extends StatelessWidget {
             _sizedContainer(
               CachedNetworkImage(
                 progressIndicatorBuilder: (context, url, progress) => Center(
-                  child: CircularProgressIndicator(
-                    value: progress.progress,
-                  ),
+                  child: CircularProgressIndicator(value: progress.progress),
                 ),
-                imageUrl:
-                    'https://images.unsplash.com/photo-1532264523420-881a47db012d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9',
+                imageUrl: 'https://images.unsplash.com/photo-1532264523420-881a47db012d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9',
               ),
             ),
             _sizedContainer(
               CachedNetworkImage(
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
-                imageUrl:
-                    'https://plus.unsplash.com/premium_photo-1695566086196-1cdadbaa1988?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+                imageUrl: 'https://plus.unsplash.com/premium_photo-1695566086196-1cdadbaa1988?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
               ),
             ),
             _sizedContainer(
               CachedNetworkImage(
-                imageUrl:
-                    'https://images.unsplash.com/photo-1644588815329-4705c4418d38?q=80&w=1473&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+                imageUrl: 'https://images.unsplash.com/photo-1644588815329-4705c4418d38?q=80&w=1473&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 imageBuilder: (context, imageProvider) => Container(
                   decoration: BoxDecoration(
                     image: DecorationImage(
@@ -199,16 +183,13 @@ class BasicContent extends StatelessWidget {
               ),
             ),
             CachedNetworkImage(
-              imageUrl:
-                  'https://images.unsplash.com/photo-1565343486673-fbd3a3ce9331?q=80&w=1471&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+              imageUrl: 'https://images.unsplash.com/photo-1565343486673-fbd3a3ce9331?q=80&w=1471&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
               placeholder: (context, url) => const CircleAvatar(
                 backgroundColor: Colors.amber,
                 radius: 150,
               ),
-              imageBuilder: (context, image) => CircleAvatar(
-                backgroundImage: image,
-                radius: 150,
-              ),
+              imageBuilder: (context, image) =>
+                  CircleAvatar(backgroundImage: image, radius: 150),
             ),
             _sizedContainer(
               CachedNetworkImage(
@@ -229,7 +210,8 @@ class BasicContent extends StatelessWidget {
                 errorListener: (e) {
                   if (e is SocketException) {
                     debugPrint(
-                        'Error with ${e.address} and message ${e.message}');
+                      'Error with ${e.address} and message ${e.message}',
+                    );
                   } else {
                     debugPrint('Image Exception is: ${e.runtimeType}');
                   }
@@ -239,8 +221,7 @@ class BasicContent extends StatelessWidget {
             _sizedContainer(
               CachedNetworkImage(
                 maxHeightDiskCache: 10,
-                imageUrl:
-                    'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+                imageUrl: 'https://images.unsplash.com/photo-1706212074955-6045fce2521d?q=80&w=1470&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
                 placeholder: (context, url) =>
                     const CircularProgressIndicator(),
                 errorBuilder: (context, error, stackTrace) =>
@@ -268,8 +249,11 @@ class BasicContent extends StatelessWidget {
     );
   }
 
-  Widget _sizedContainer(Widget child,
-      {double width = double.infinity, double height = 250}) {
+  Widget _sizedContainer(
+    Widget child, {
+    double width = double.infinity,
+    double height = 250,
+  }) {
     return SizedBox(
       width: width,
       height: height,
@@ -290,11 +274,8 @@ class ListContent extends StatelessWidget {
           children: <Widget>[
             CachedNetworkImage(
               imageUrl: 'https://loremflickr.com/320/240/music?lock=$index',
-              placeholder: (BuildContext context, String url) => Container(
-                width: 320,
-                height: 240,
-                color: Colors.purple,
-              ),
+              placeholder: (BuildContext context, String url) =>
+                  Container(width: 320, height: 240, color: Colors.purple),
             ),
           ],
         ),
@@ -312,8 +293,9 @@ class GridContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return GridView.builder(
       itemCount: 250,
-      gridDelegate:
-          const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+      ),
       itemBuilder: (BuildContext context, int index) => CachedNetworkImage(
         imageUrl: 'https://loremflickr.com/100/100/music?lock=$index',
         placeholder: _loader,
@@ -351,9 +333,8 @@ class _PreCacheContentState extends State<PreCacheContent> {
       if (mounted) setState(() => _cached = true);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PreCache failed: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('PreCache failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -429,8 +410,10 @@ class _AnimateContentState extends State<AnimateContent> {
         children: [
           SwitchListTile(
             title: const Text('animate'),
-            subtitle: const Text('Freezes on the first frame. Switching back '
-                'on resolves a different provider key.'),
+            subtitle: const Text(
+              'Freezes on the first frame. Switching back '
+              'on resolves a different provider key.',
+            ),
             value: _animate,
             onChanged: (value) => setState(() => _animate = value),
           ),
@@ -453,8 +436,10 @@ class _AnimateContentState extends State<AnimateContent> {
           const Divider(height: 32),
           SwitchListTile(
             title: const Text('TickerMode'),
-            subtitle: const Text('Pauses and resumes in place. Also what '
-                'MediaQueryData.disableAnimations uses.'),
+            subtitle: const Text(
+              'Pauses and resumes in place. Also what '
+              'MediaQueryData.disableAnimations uses.',
+            ),
             value: _ticking,
             onChanged: (value) => setState(() => _ticking = value),
           ),

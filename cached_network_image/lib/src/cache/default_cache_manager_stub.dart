@@ -1,6 +1,8 @@
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:file/file.dart';
 
+import 'cleanup_strategy.dart';
+
 export 'cache_entry_metadata.dart';
 
 /// Stub [DefaultCacheManager] for unsupported platforms.
@@ -11,12 +13,24 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   DefaultCacheManager({
     Duration stalePeriod = const Duration(days: 7),
     int maxNrOfCacheObjects = 200,
+    this.maxIdleDuration,
+    this.cleanupOnInitialize = true,
     ConnectionParameters? connectionParameters,
+    CleanupStrategy? cleanupStrategy,
   }) {
     throw UnsupportedError(
       'DefaultCacheManager is not supported on this platform.',
     );
   }
+
+  /// Maximum time an entry may remain unaccessed before cleanup removes it.
+  final Duration? maxIdleDuration;
+
+  /// Whether cleanup is enabled during initialization.
+  final bool cleanupOnInitialize;
+
+  /// Enables cleanup and waits for one cleanup sweep to finish.
+  Future<void> startCleanup() => throw UnsupportedError('Unsupported platform');
 
   @override
   Future<void> dispose() => throw UnsupportedError('Unsupported platform');

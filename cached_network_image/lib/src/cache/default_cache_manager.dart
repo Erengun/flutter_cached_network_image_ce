@@ -1076,7 +1076,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         isOverCapacity: _isOverCapacity,
         candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
         evict: _evictEntry,
-        retry: () => _scheduleCleanup(capacity: true),
+        // Without startCleanup, a retry may only enforce the byte limit.
+        retry: () => _cleanup.capacityCleanupEnabled
+            ? _scheduleCleanup(capacity: true)
+            : _scheduleByteLimitEviction(),
       );
     } on Object catch (e) {
       cacheLogger.log(

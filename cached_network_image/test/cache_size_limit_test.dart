@@ -240,6 +240,42 @@ void main() {
       expect(await manager.getCacheSize(), 60);
     });
 
+    test('a sweep retry under the byte limit does not enforce the count cap',
+        () async {
+      final dir = _temporaryDirectory('byte_limit_retry_count_cap_');
+      final t0 = DateTime.utc(2026, 1, 1);
+      var now = t0;
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxNrOfCacheObjects: 2,
+        maxCacheSizeInBytes: 1000,
+        cleanupOnInitialize: false,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock(() => now), () async {
+        for (var i = 0; i < 3; i++) {
+          await manager.putFile(
+            'https://example.com/retry-$i',
+            _bytes(10),
+            key: 'retry-$i',
+          );
+        }
+
+        // All entries are protected, so the sweep arms a retry that fires
+        // 10 ms later, when their protection has expired.
+        now = t0.add(const Duration(seconds: 29, milliseconds: 990));
+        await manager.debugRunCleanup();
+        now = t0.add(const Duration(seconds: 31));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+
+      for (var i = 0; i < 3; i++) {
+        expect(await manager.getFileFromCache('retry-$i'), isNotNull);
+      }
+    });
+
     test('no limit: stores above the count cap trigger no runtime sweep',
         () async {
       final dir = _temporaryDirectory('byte_limit_none_');

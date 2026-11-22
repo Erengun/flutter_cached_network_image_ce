@@ -10,7 +10,7 @@ import 'package:cached_network_image_platform_interface_ce'
         '/cached_network_image_platform_interface_ce.dart' as platform
     show ImageLoader, ImageRenderMethodForWeb;
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 enum _State { open, waitingForData, closing }
 

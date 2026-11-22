@@ -1,6 +1,6 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:octo_image/octo_image.dart';
@@ -111,9 +111,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               imageBuilder: (context, imageProvider) {
@@ -135,9 +137,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
             ),
@@ -156,9 +160,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               width: 100,
@@ -183,9 +189,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               fit: BoxFit.cover,
@@ -213,12 +221,14 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
-              color: Colors.red,
+              color: const Color(0xFFF44336),
               colorBlendMode: BlendMode.srcOver,
             ),
           ),
@@ -233,9 +243,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               filterQuality: FilterQuality.high,
@@ -252,9 +264,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               memCacheWidth: 50,
@@ -272,9 +286,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               animate: false,
@@ -293,9 +309,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               useOldImageOnUrlChange: true,
@@ -312,9 +330,11 @@ void main() {
       cacheManager.returns(imageUrl, kTransparentImage);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               placeholderFadeInDuration: const Duration(milliseconds: 300),
@@ -334,14 +354,16 @@ void main() {
       var errorBuilderCalled = false;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               errorWidget: (context, url, error) {
                 errorBuilderCalled = true;
-                return const Icon(Icons.error);
+                return const Text('error');
               },
             ),
           ),
@@ -358,14 +380,16 @@ void main() {
       DownloadProgress? lastProgress;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               progressIndicatorBuilder: (context, url, progress) {
                 lastProgress = progress;
-                return const CircularProgressIndicator();
+                return const SizedBox();
               },
             ),
           ),
@@ -400,14 +424,16 @@ void main() {
       var placeholderBuilt = false;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               placeholder: (context, url) {
                 placeholderBuilt = true;
-                return const CircularProgressIndicator();
+                return const SizedBox();
               },
             ),
           ),
@@ -427,14 +453,16 @@ void main() {
       var placeholderBuilt = false;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               placeholder: (context, url) {
                 placeholderBuilt = true;
-                return const CircularProgressIndicator();
+                return const SizedBox();
               },
             ),
           ),
@@ -461,20 +489,22 @@ void main() {
       await tester.pumpWidget(
         StatefulBuilder(
           builder: (context, setState) {
-            return MaterialApp(
-              home: Scaffold(
-                body: Column(
+            return Directionality(
+              textDirection: TextDirection.ltr,
+              child: MediaQuery(
+                data: const MediaQueryData(),
+                child: Column(
                   children: [
                     CachedNetworkImage(
                       imageUrl: currentUrl,
                       cacheManager: cacheManager,
                       placeholder: (context, url) {
                         placeholderBuilt = true;
-                        return const CircularProgressIndicator();
+                        return const SizedBox();
                       },
                     ),
-                    TextButton(
-                      onPressed: () => setState(() => currentUrl = uncachedUrl),
+                    GestureDetector(
+                      onTap: () => setState(() => currentUrl = uncachedUrl),
                       child: const Text('Switch'),
                     ),
                   ],
@@ -522,9 +552,11 @@ void main() {
       await tester.pumpWidget(
         StatefulBuilder(
           builder: (context, setState) {
-            return MaterialApp(
-              home: Scaffold(
-                body: Column(
+            return Directionality(
+              textDirection: TextDirection.ltr,
+              child: MediaQuery(
+                data: const MediaQueryData(),
+                child: Column(
                   children: [
                     CachedNetworkImage(
                       imageUrl: imageUrl,
@@ -540,8 +572,8 @@ void main() {
                       // reasons unrelated to what this test is checking.
                       placeholder: (context, url) => const Text('loading'),
                     ),
-                    TextButton(
-                      onPressed: () => setState(() => rebuildCount++),
+                    GestureDetector(
+                      onTap: () => setState(() => rebuildCount++),
                       child: const Text('Unrelated setState'),
                     ),
                   ],
@@ -597,9 +629,11 @@ void main() {
       await tester.pumpWidget(
         StatefulBuilder(
           builder: (context, setState) {
-            return MaterialApp(
-              home: Scaffold(
-                body: Column(
+            return Directionality(
+              textDirection: TextDirection.ltr,
+              child: MediaQuery(
+                data: const MediaQueryData(),
+                child: Column(
                   children: [
                     CachedNetworkImage(
                       imageUrl: imageUrl,
@@ -615,8 +649,8 @@ void main() {
                       httpHeaders: {'Authorization': 'token'},
                       placeholder: (context, url) => const Text('loading'),
                     ),
-                    TextButton(
-                      onPressed: () => setState(() => rebuildCount++),
+                    GestureDetector(
+                      onTap: () => setState(() => rebuildCount++),
                       child: const Text('Unrelated setState'),
                     ),
                   ],
@@ -650,15 +684,17 @@ void main() {
       var placeholderBuilt = false;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               disablePlaceholderOnCacheHit: false,
               placeholder: (context, url) {
                 placeholderBuilt = true;
-                return const CircularProgressIndicator();
+                return const SizedBox();
               },
             ),
           ),

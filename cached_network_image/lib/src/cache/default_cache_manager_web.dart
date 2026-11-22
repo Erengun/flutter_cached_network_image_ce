@@ -442,7 +442,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           key,
           previousPath is String ? previousPath : null,
         );
-        return _bytesToFile(metadata.relativePath, bytes);
+        // A throwaway file system keeps the bytes only while the caller
+        // holds the file.
+        return MemoryFileSystem().file('/${metadata.relativePath}')
+          ..writeAsBytesSync(bytes);
       }
       final stored = metadata.toMap()
         ..['touchedAt'] = clock.now().millisecondsSinceEpoch;
@@ -709,6 +712,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   void _markServed(String key) {
     _cleanup.markServed(key, clock.now());
   }
+
+  /// Whether the shared in-memory file system holds a file at [path].
+  /// Test-only.
+  @visibleForTesting
+  bool debugIsMaterialized(String path) => _memFs.file(path).existsSync();
 
   /// Number of entries currently protected from eviction. Test-only.
   @visibleForTesting

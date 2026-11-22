@@ -1508,6 +1508,7 @@ void main() {
       final file = await manager.putFile(url, bytes(20));
 
       expect(await file.length(), 20);
+      expect(manager.debugIsMaterialized(file.path), isFalse);
       expect(await manager.getFileFromCache(url), isNull);
       expect(await manager.getCacheSize(), 0);
       expect(
@@ -1541,6 +1542,7 @@ void main() {
 
       expect(info.source, FileSource.Online);
       expect(await info.file.length(), 20);
+      expect(manager.debugIsMaterialized(info.file.path), isFalse);
       expect(await manager.getFileFromCache(url), isNull);
       expect(await manager.getCacheSize(), 0);
     });

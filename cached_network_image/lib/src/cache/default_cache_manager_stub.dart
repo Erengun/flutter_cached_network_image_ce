@@ -14,6 +14,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     Duration stalePeriod = const Duration(days: 7),
     int maxNrOfCacheObjects = 200,
     this.maxIdleDuration,
+    this.maxCacheSizeInBytes,
     this.cleanupOnInitialize = true,
     ConnectionParameters? connectionParameters,
     CleanupStrategy? cleanupStrategy,
@@ -25,6 +26,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   /// Maximum time an entry may remain unaccessed before cleanup removes it.
   final Duration? maxIdleDuration;
+
+  /// Maximum total size in bytes of cached files.
+  final int? maxCacheSizeInBytes;
 
   /// Whether cleanup is enabled during initialization.
   final bool cleanupOnInitialize;

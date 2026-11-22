@@ -8,11 +8,13 @@ void main() {
     final manager = DefaultCacheManager(
       maxNrOfCacheObjects: 2,
       maxIdleDuration: const Duration(hours: 1),
+      maxCacheSizeInBytes: 1024,
       cleanupOnInitialize: false,
       cleanupStrategy: const LruCleanupStrategy(),
     );
 
     expect(manager.maxIdleDuration, const Duration(hours: 1));
+    expect(manager.maxCacheSizeInBytes, 1024);
     expect(manager.cleanupOnInitialize, isFalse);
     expect(manager.startCleanup, isA<Future<void> Function()>());
 

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:cached_network_image_ce/cached_network_image.dart'
-    show LruCleanupStrategy;
+    show CleanupStrategy, LruCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager_web.dart';
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:clock/clock.dart';
@@ -1353,6 +1353,282 @@ void main() {
   });
 
   // =====================================================================
+  // Byte limit / oversized entries
+  // =====================================================================
+
+  group('WebCacheManager byte limit', () {
+    List<int> bytes(int length) => List.filled(length, 0);
+
+    Future<void> waitForEviction() =>
+        Future<void>.delayed(const Duration(milliseconds: 20));
+
+    test('defaults to no byte limit', () {
+      expect(
+        DefaultCacheManager(hiveInstance: testHive).maxCacheSizeInBytes,
+        isNull,
+      );
+    });
+
+    test('rejects a non-positive limit', () {
+      expect(
+        () => DefaultCacheManager(
+          hiveInstance: testHive,
+          maxCacheSizeInBytes: 0,
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('a store over the limit evicts in strategy order without startCleanup',
+        () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 100,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock.fixed(t0), () {
+        return manager.putFile('https://example.com/a', bytes(40), key: 'a');
+      });
+      await withClock(Clock.fixed(t0.add(const Duration(minutes: 1))), () {
+        return manager.putFile('https://example.com/b', bytes(40), key: 'b');
+      });
+      await withClock(Clock.fixed(t0.add(const Duration(minutes: 2))), () {
+        return manager.putFile('https://example.com/c', bytes(40), key: 'c');
+      });
+      await waitForEviction();
+
+      expect(await manager.getFileFromCache('a'), isNull);
+      expect(await manager.getFileFromCache('b'), isNotNull);
+      expect(await manager.getFileFromCache('c'), isNotNull);
+      expect(await manager.getCacheSize(), lessThanOrEqualTo(100));
+    });
+
+    test('byte eviction does not enforce the count cap', () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxNrOfCacheObjects: 2,
+        maxCacheSizeInBytes: 1000,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(manager.dispose);
+
+      for (var i = 0; i < 4; i++) {
+        await withClock(Clock.fixed(t0.add(Duration(minutes: i))), () {
+          return manager.putFile(
+            'https://example.com/count-$i',
+            bytes(10),
+            key: 'count-$i',
+          );
+        });
+      }
+      await waitForEviction();
+
+      for (var i = 0; i < 4; i++) {
+        expect(await manager.getFileFromCache('count-$i'), isNotNull);
+      }
+    });
+
+    test('startup sweep enforces the byte limit', () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      final writer = DefaultCacheManager(hiveInstance: testHive);
+      await withClock(Clock.fixed(t0), () async {
+        for (var i = 0; i < 3; i++) {
+          await writer.putFile(
+            'https://example.com/startup-$i',
+            bytes(40),
+            key: 'startup-$i',
+          );
+        }
+      });
+      await writer.dispose();
+
+      final reader = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 100,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(reader.dispose);
+
+      await withClock(
+        Clock.fixed(t0.add(const Duration(hours: 1))),
+        reader.debugRunCleanup,
+      );
+
+      expect(await reader.getCacheSize(), lessThanOrEqualTo(100));
+    });
+
+    test('a sweep retry under the byte limit does not enforce the count cap',
+        () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      var now = t0;
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxNrOfCacheObjects: 2,
+        maxCacheSizeInBytes: 1000,
+        cleanupOnInitialize: false,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock(() => now), () async {
+        for (var i = 0; i < 3; i++) {
+          await manager.putFile(
+            'https://example.com/retry-$i',
+            bytes(10),
+            key: 'retry-$i',
+          );
+        }
+
+        // All entries are protected, so the sweep arms a retry that fires
+        // 10 ms later, when their protection has expired.
+        now = t0.add(const Duration(seconds: 29, milliseconds: 990));
+        await manager.debugRunCleanup();
+        now = t0.add(const Duration(seconds: 31));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+
+      for (var i = 0; i < 3; i++) {
+        expect(await manager.getFileFromCache('retry-$i'), isNotNull);
+      }
+    });
+
+    test('startCleanup during a byte pass still runs the full sweep', () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      var now = t0;
+      final strategy = _HookedLruCleanupStrategy();
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 100,
+        cleanupOnInitialize: false,
+        cleanupStrategy: strategy,
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock(() => now), () async {
+        await manager.putFile('https://example.com/x', bytes(60), key: 'x');
+        now = t0.add(const Duration(minutes: 1));
+        await manager.putFile(
+          'https://example.com/expired',
+          bytes(10),
+          key: 'expired',
+          maxAge: Duration.zero,
+        );
+        now = t0.add(const Duration(minutes: 2));
+        Future<void>? cleanup;
+        // The byte pass started by this store calls startCleanup mid-pass.
+        strategy.onSort = () => cleanup = manager.startCleanup();
+        await manager.putFile('https://example.com/y', bytes(60), key: 'y');
+        await cleanup;
+      });
+
+      expect(await manager.getFileFromCache('expired'), isNull);
+      expect(await manager.getFileFromCache('x'), isNull);
+      expect(await manager.getFileFromCache('y'), isNotNull);
+    });
+
+    test('after startCleanup, byte-only overflow skips the full sweep',
+        () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      var now = t0;
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 100,
+        cleanupOnInitialize: false,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock(() => now), () async {
+        await manager.startCleanup();
+        await manager.putFile('https://example.com/x', bytes(60), key: 'x');
+        now = t0.add(const Duration(minutes: 1));
+        await manager.putFile(
+          'https://example.com/expired',
+          bytes(10),
+          key: 'expired',
+          maxAge: Duration.zero,
+        );
+        now = t0.add(const Duration(minutes: 2));
+        await manager.putFile('https://example.com/y', bytes(60), key: 'y');
+        await waitForEviction();
+      });
+
+      // The expiry pass belongs to the full sweep only.
+      expect(await manager.getFileFromCache('expired'), isNotNull);
+      expect(await manager.getFileFromCache('x'), isNull);
+      expect(await manager.getFileFromCache('y'), isNotNull);
+    });
+
+    test('oversized putFile is returned but not cached', () async {
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/put';
+
+      await manager.putFile(url, bytes(5));
+      final file = await manager.putFile(url, bytes(20));
+
+      expect(await file.length(), 20);
+      expect(manager.debugIsMaterialized(file.path), isFalse);
+      expect(await manager.getFileFromCache(url), isNull);
+      expect(await manager.getCacheSize(), 0);
+      expect(
+        testHive.box<Map>('cached_network_image_cache').containsKey(url),
+        isFalse,
+      );
+      expect(
+        testHive
+            .lazyBox<List<int>>('cached_network_image_data')
+            .containsKey(url),
+        isFalse,
+      );
+    });
+
+    test('oversized download is delivered but not cached', () async {
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 10,
+        httpClientFactory: () => http_testing.MockClient(
+          (request) async => http.Response.bytes(bytes(20), 200),
+        ),
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/oversized.png';
+
+      final info = await manager
+          .getFileStream(url)
+          .where((response) => response is FileInfo)
+          .cast<FileInfo>()
+          .last;
+
+      expect(info.source, FileSource.Online);
+      expect(await info.file.length(), 20);
+      expect(manager.debugIsMaterialized(info.file.path), isFalse);
+      expect(await manager.getFileFromCache(url), isNull);
+      expect(await manager.getCacheSize(), 0);
+    });
+
+    test('entry exactly at the limit is cached', () async {
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/exact';
+
+      await manager.putFile(url, bytes(10));
+
+      expect(await manager.getFileFromCache(url), isNotNull);
+    });
+  });
+
+  // =====================================================================
   // StreamController / http.Client lifecycle (leak checks)
   // =====================================================================
 
@@ -1724,6 +2000,21 @@ void main() {
       await manager.dispose();
     });
   });
+}
+
+/// LRU strategy that runs [onSort] once, on its next call.
+final class _HookedLruCleanupStrategy extends CleanupStrategy {
+  void Function()? onSort;
+
+  @override
+  List<MapEntry<String, CacheEntryMetadata>> sortForEviction(
+    List<MapEntry<String, CacheEntryMetadata>> entries,
+  ) {
+    final hook = onSort;
+    onSort = null;
+    hook?.call();
+    return const LruCleanupStrategy().sortForEviction(entries);
+  }
 }
 
 /// A wrapper around [http.Client] that tracks whether [close] was called.

@@ -32,6 +32,7 @@ const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
 const _kOrphanFileGracePeriod = Duration(minutes: 5);
+const _kNoCacheDirName = 'cached_network_image_ce_nocache';
 const _kServedEntryGracePeriod = Duration(seconds: 30);
 
 /// Size at which recently served entries are swept for expired records.
@@ -62,6 +63,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
   /// [maxIdleDuration] removes files that have not been accessed for that
   /// duration instead of removing files based on [CacheEntryMetadata.validTill].
+  /// [maxCacheSizeInBytes] caps the total size of cached files. When a store
+  ///   pushes the cache over it, entries are evicted in [cleanupStrategy]
+  ///   order. Entries handed to callers in the last 30 seconds are protected,
+  ///   so the cache can briefly exceed the limit until they can be evicted.
+  ///   Defaults to null (no byte limit).
   /// [cleanupOnInitialize] can defer cleanup until [startCleanup] is called.
   /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   /// [cacheDirectoryProvider] allows overriding where cache files are stored.
@@ -74,6 +80,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
     this.maxIdleDuration,
+    this.maxCacheSizeInBytes,
     this.cleanupOnInitialize = true,
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
@@ -88,7 +95,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         _metadataDirectoryProvider = metadataDirectoryProvider,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
-        _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
+        _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy(),
+        assert(maxCacheSizeInBytes == null || maxCacheSizeInBytes > 0);
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
@@ -101,6 +109,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// When null, cleanup keeps the legacy behavior of removing entries whose
   /// [CacheEntryMetadata.validTill] is in the past.
   final Duration? maxIdleDuration;
+
+  /// Maximum total size in bytes of cached files.
+  ///
+  /// When null (the default), the cache has no byte limit.
+  final int? maxCacheSizeInBytes;
 
   /// Whether cleanup is enabled during initialization.
   final bool cleanupOnInitialize;
@@ -234,6 +247,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
     }
     _metadataPathRevision++;
+    _cleanup.byteLimitEvictionEnabled = maxCacheSizeInBytes != null;
 
     if (cleanupOnInitialize) {
       unawaited(_scheduleCleanup());
@@ -559,6 +573,26 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
+    if (_exceedsByteLimit(receivedBytes)) {
+      final File file;
+      try {
+        file = await _deliverUncached(
+          sanitizedKey,
+          relativePath,
+          tempFile.copy,
+        );
+      } finally {
+        try {
+          if (await tempFile.exists()) await tempFile.delete();
+        } finally {
+          releaseTempPath();
+        }
+      }
+      yield FileInfo(
+          file, FileSource.Online, clock.now().add(stalePeriod), url);
+      return;
+    }
+
     final releaseStore = await _cleanup.beginStore(
       sanitizedKey,
       path: relativePath,
@@ -641,9 +675,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       } else {
         // Interceptor rejected storage: copy to a temp file for this delivery,
         // then delete the cache-directory copy so nothing is orphaned there.
-        final tempPath =
-            '${io.Directory.systemTemp.path}/${path.basename(filePath)}'
-            '.${DateTime.now().microsecondsSinceEpoch}.nocache';
+        final tempPath = await _noCachePath(path.basename(filePath));
         await io.File(filePath).copy(tempPath);
         final f = io.File(filePath);
         if (await f.exists()) await f.delete();
@@ -759,6 +791,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final sanitizedKey = _sanitizeBoxKey(key);
     final relativePath = _generateRelativePath(key, fileExtension);
+    if (_exceedsByteLimit(fileBytes.length)) {
+      return _deliverUncached(
+        sanitizedKey,
+        relativePath,
+        (deliveryPath) => io.File(deliveryPath).writeAsBytes(fileBytes),
+      );
+    }
     final releaseStore = await _cleanup.beginStore(
       sanitizedKey,
       path: relativePath,
@@ -825,18 +864,72 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     final sanitizedKey = _sanitizeBoxKey(key);
-    final box = _cacheBox!;
     final releaseRemoval = await _cleanup.beginStore(sanitizedKey);
     try {
-      final raw = box.get(sanitizedKey);
-      if (raw == null) return;
-      final metadata = CacheEntryMetadata.fromMap(raw);
-      final file = io.File(_cacheFilePath(metadata.relativePath));
-      if (await file.exists()) {
-        await file.delete();
+      await _deleteEntry(sanitizedKey);
+    } finally {
+      releaseRemoval();
+      _scheduleCapacityCleanup();
+    }
+  }
+
+  /// Deletes the file and metadata stored for [sanitizedKey]. Callers must
+  /// hold the store lease for the key.
+  Future<void> _deleteEntry(String sanitizedKey) async {
+    final box = _cacheBox!;
+    final raw = box.get(sanitizedKey);
+    if (raw == null) return;
+    final metadata = CacheEntryMetadata.fromMap(raw);
+    final file = io.File(_cacheFilePath(metadata.relativePath));
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await box.delete(sanitizedKey);
+    _metadataPathRevision++;
+  }
+
+  static int _noCacheSequence = 0;
+
+  /// Directory outside the cache for files delivered but not cached. Full
+  /// sweeps delete its stale files and [emptyCache] clears it.
+  static io.Directory get _noCacheDirectory =>
+      io.Directory(path.join(io.Directory.systemTemp.path, _kNoCacheDirName));
+
+  /// Creates the no-cache directory and returns a unique path in it for a
+  /// file that is delivered to the caller but not cached.
+  Future<String> _noCachePath(String fileName) async {
+    final directory = await _noCacheDirectory.create(recursive: true);
+    return path.join(
+      directory.path,
+      '$fileName.${DateTime.now().microsecondsSinceEpoch}'
+      '.${_noCacheSequence++}.nocache',
+    );
+  }
+
+  /// Delivers an entry larger than [maxCacheSizeInBytes] without caching it.
+  ///
+  /// [write] creates the file at a [_noCachePath]. Any entry already cached
+  /// for [sanitizedKey] is removed, so the oversized response replaces it.
+  Future<File> _deliverUncached(
+    String sanitizedKey,
+    String fileName,
+    Future<void> Function(String deliveryPath) write,
+  ) async {
+    final releaseRemoval = await _cleanup.beginStore(sanitizedKey);
+    try {
+      final deliveryPath = await _noCachePath(fileName);
+      try {
+        await write(deliveryPath);
+        await _deleteEntry(sanitizedKey);
+      } on Object catch (_) {
+        try {
+          await io.File(deliveryPath).delete();
+        } on Object catch (_) {
+          // The write may not have created the file.
+        }
+        rethrow;
       }
-      await box.delete(sanitizedKey);
-      _metadataPathRevision++;
+      return const LocalFileSystem().file(deliveryPath);
     } finally {
       releaseRemoval();
       _scheduleCapacityCleanup();
@@ -861,6 +954,38 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     await _cacheBox!.clear();
     _metadataPathRevision++;
+    await _deleteNoCacheFiles();
+  }
+
+  /// Deletes files in the no-cache directory, or only those last modified
+  /// at least [_kOrphanFileGracePeriod] before [olderThan] when given.
+  Future<void> _deleteNoCacheFiles({DateTime? olderThan}) async {
+    try {
+      final directory = _noCacheDirectory;
+      if (!await directory.exists()) return;
+      await for (final entity in directory.list()) {
+        if (entity is! io.File) continue;
+        try {
+          if (olderThan != null) {
+            final stat = await entity.stat();
+            if (olderThan.difference(stat.modified) < _kOrphanFileGracePeriod) {
+              continue;
+            }
+          }
+          await entity.delete();
+        } on Object catch (e) {
+          cacheLogger.log(
+            'CacheManager: Error deleting uncached file ${entity.path}: $e',
+            CacheManagerLogLevel.warning,
+          );
+        }
+      }
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error listing uncached files: $e',
+        CacheManagerLogLevel.warning,
+      );
+    }
   }
 
   /// Returns the total size in bytes of the images stored in the disk cache.
@@ -894,6 +1019,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @override
   Future<void> dispose() async {
     _cleanup.capacityCleanupEnabled = false;
+    _cleanup.byteLimitEvictionEnabled = false;
     _cleanup.cancelCapacityRetry();
     final inFlightInit = _initCompleter;
     if (inFlightInit != null) {
@@ -962,18 +1088,89 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
   }
 
+  /// Only a store above [maxNrOfCacheObjects] needs the full sweep; byte
+  /// overflow alone is handled by the lighter byte pass.
   void _scheduleCapacityCleanup() {
-    if (_cleanup.capacityCleanupEnabled && _isOverCapacity()) {
+    if (_cleanup.capacityCleanupEnabled && _isOverCount()) {
       unawaited(_scheduleCleanup(capacity: true));
+    } else if (_isOverByteLimit()) {
+      unawaited(_scheduleByteLimitEviction());
     }
   }
 
-  bool _isOverCapacity() {
+  /// Retries capacity eviction once protected entries become evictable,
+  /// choosing the pass the same way as [_scheduleCapacityCleanup].
+  Future<void> _retryCapacityCleanup() =>
+      _cleanup.capacityCleanupEnabled && _isOverCount()
+          ? _scheduleCleanup(capacity: true)
+          : _scheduleByteLimitEviction();
+
+  Future<void> _scheduleByteLimitEviction() {
+    return _cleanup.schedule(
+      _evictOverByteLimit,
+      _isOverByteLimit,
+      capacity: true,
+      fullSweep: false,
+    );
+  }
+
+  bool _isOverCapacity() => _isOverCount() || _isOverByteLimit();
+
+  bool _isOverCount() {
     final box = _cacheBox;
     try {
       return box != null && box.isOpen && box.length > maxNrOfCacheObjects;
     } on Object catch (_) {
       return false;
+    }
+  }
+
+  bool _exceedsByteLimit(int length) {
+    final limit = maxCacheSizeInBytes;
+    return limit != null && length > limit;
+  }
+
+  bool _isOverByteLimit() {
+    final limit = maxCacheSizeInBytes;
+    if (limit == null) return false;
+    try {
+      return _cachedBytes() > limit;
+    } on Object catch (_) {
+      return false;
+    }
+  }
+
+  /// Sum of the stored lengths of all entries. Entries without a length
+  /// count as zero bytes.
+  int _cachedBytes() {
+    final box = _cacheBox;
+    if (box == null || !box.isOpen) return 0;
+    var total = 0;
+    for (final raw in box.values) {
+      total += raw['length'] as int? ?? 0;
+    }
+    return total;
+  }
+
+  /// Evicts entries in strategy order until the cache fits the byte limit.
+  ///
+  /// Unlike [_cleanupOldFiles], this skips the expiry and orphan sweep and
+  /// does not enforce [maxNrOfCacheObjects].
+  Future<void> _evictOverByteLimit() async {
+    try {
+      _cleanup.pruneRecentlyServed(clock.now());
+      await _cleanup.evictOverCapacity(
+        now: clock.now,
+        isOverCapacity: _isOverByteLimit,
+        candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
+        evict: _evictEntry,
+        retry: _retryCapacityCleanup,
+      );
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error during byte limit eviction: $e',
+        CacheManagerLogLevel.warning,
+      );
     }
   }
 
@@ -996,6 +1193,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         pathSnapshotRevision,
         now,
       );
+      await _deleteNoCacheFiles(olderThan: now);
 
       // Remove expired entries
       for (final entry in entries) {
@@ -1009,7 +1207,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         isOverCapacity: _isOverCapacity,
         candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
         evict: _evictEntry,
-        retry: () => _scheduleCleanup(capacity: true),
+        retry: _retryCapacityCleanup,
       );
     } on Object catch (e) {
       cacheLogger.log(

@@ -62,6 +62,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
   /// [maxIdleDuration] removes files that have not been accessed for that
   /// duration instead of removing files based on [CacheEntryMetadata.validTill].
+  /// [maxCacheSizeInBytes] caps the total size of cached files. When a store
+  ///   pushes the cache over it, entries are evicted in [cleanupStrategy]
+  ///   order. Defaults to null (no byte limit).
   /// [cleanupOnInitialize] can defer cleanup until [startCleanup] is called.
   /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   /// [cacheDirectoryProvider] allows overriding where cache files are stored.
@@ -74,6 +77,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
     this.maxIdleDuration,
+    this.maxCacheSizeInBytes,
     this.cleanupOnInitialize = true,
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
@@ -88,7 +92,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         _metadataDirectoryProvider = metadataDirectoryProvider,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
-        _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
+        _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy(),
+        assert(maxCacheSizeInBytes == null || maxCacheSizeInBytes > 0);
 
   /// Duration before cached files are considered stale.
   final Duration stalePeriod;
@@ -101,6 +106,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// When null, cleanup keeps the legacy behavior of removing entries whose
   /// [CacheEntryMetadata.validTill] is in the past.
   final Duration? maxIdleDuration;
+
+  /// Maximum total size in bytes of cached files.
+  ///
+  /// When null (the default), the cache has no byte limit.
+  final int? maxCacheSizeInBytes;
 
   /// Whether cleanup is enabled during initialization.
   final bool cleanupOnInitialize;
@@ -234,6 +244,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
     }
     _metadataPathRevision++;
+    _cleanup.byteLimitEvictionEnabled = maxCacheSizeInBytes != null;
 
     if (cleanupOnInitialize) {
       unawaited(_scheduleCleanup());
@@ -894,6 +905,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   @override
   Future<void> dispose() async {
     _cleanup.capacityCleanupEnabled = false;
+    _cleanup.byteLimitEvictionEnabled = false;
     _cleanup.cancelCapacityRetry();
     final inFlightInit = _initCompleter;
     if (inFlightInit != null) {
@@ -965,15 +977,70 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   void _scheduleCapacityCleanup() {
     if (_cleanup.capacityCleanupEnabled && _isOverCapacity()) {
       unawaited(_scheduleCleanup(capacity: true));
+    } else if (_isOverByteLimit()) {
+      unawaited(_scheduleByteLimitEviction());
     }
+  }
+
+  Future<void> _scheduleByteLimitEviction() {
+    return _cleanup.schedule(
+      _evictOverByteLimit,
+      _isOverByteLimit,
+      capacity: true,
+    );
   }
 
   bool _isOverCapacity() {
     final box = _cacheBox;
     try {
-      return box != null && box.isOpen && box.length > maxNrOfCacheObjects;
+      return (box != null && box.isOpen && box.length > maxNrOfCacheObjects) ||
+          _isOverByteLimit();
     } on Object catch (_) {
       return false;
+    }
+  }
+
+  bool _isOverByteLimit() {
+    final limit = maxCacheSizeInBytes;
+    if (limit == null) return false;
+    try {
+      return _cachedBytes() > limit;
+    } on Object catch (_) {
+      return false;
+    }
+  }
+
+  /// Sum of the stored lengths of all entries. Entries without a length
+  /// count as zero bytes.
+  int _cachedBytes() {
+    final box = _cacheBox;
+    if (box == null || !box.isOpen) return 0;
+    var total = 0;
+    for (final raw in box.values) {
+      total += raw['length'] as int? ?? 0;
+    }
+    return total;
+  }
+
+  /// Evicts entries in strategy order until the cache fits the byte limit.
+  ///
+  /// Unlike [_cleanupOldFiles], this skips the expiry and orphan sweep and
+  /// does not enforce [maxNrOfCacheObjects].
+  Future<void> _evictOverByteLimit() async {
+    try {
+      _cleanup.pruneRecentlyServed(clock.now());
+      await _cleanup.evictOverCapacity(
+        now: clock.now,
+        isOverCapacity: _isOverByteLimit,
+        candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
+        evict: _evictEntry,
+        retry: _scheduleByteLimitEviction,
+      );
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error during byte limit eviction: $e',
+        CacheManagerLogLevel.warning,
+      );
     }
   }
 

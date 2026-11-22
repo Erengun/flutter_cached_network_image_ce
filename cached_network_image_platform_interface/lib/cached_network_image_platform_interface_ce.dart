@@ -4,7 +4,7 @@ library cached_network_image_platform_interface_ce;
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 import 'src/cache_manager.dart';
 

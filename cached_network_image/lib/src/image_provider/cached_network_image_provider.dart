@@ -9,7 +9,7 @@ import 'package:cached_network_image_platform_interface_ce/cached_network_image_
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart'
     show ErrorListener, ImageRenderMethodForWeb;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 /// IO implementation of the CachedNetworkImageProvider; the ImageProvider to
 /// load network images using a cache.

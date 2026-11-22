@@ -570,6 +570,26 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
+    if (_exceedsByteLimit(receivedBytes)) {
+      final File file;
+      try {
+        file = await _deliverUncached(
+          sanitizedKey,
+          relativePath,
+          tempFile.copy,
+        );
+      } finally {
+        try {
+          if (await tempFile.exists()) await tempFile.delete();
+        } finally {
+          releaseTempPath();
+        }
+      }
+      yield FileInfo(
+          file, FileSource.Online, clock.now().add(stalePeriod), url);
+      return;
+    }
+
     final releaseStore = await _cleanup.beginStore(
       sanitizedKey,
       path: relativePath,
@@ -652,9 +672,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       } else {
         // Interceptor rejected storage: copy to a temp file for this delivery,
         // then delete the cache-directory copy so nothing is orphaned there.
-        final tempPath =
-            '${io.Directory.systemTemp.path}/${path.basename(filePath)}'
-            '.${DateTime.now().microsecondsSinceEpoch}.nocache';
+        final tempPath = _noCachePath(path.basename(filePath));
         await io.File(filePath).copy(tempPath);
         final f = io.File(filePath);
         if (await f.exists()) await f.delete();
@@ -770,6 +788,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     key ??= url;
     final sanitizedKey = _sanitizeBoxKey(key);
     final relativePath = _generateRelativePath(key, fileExtension);
+    if (_exceedsByteLimit(fileBytes.length)) {
+      return _deliverUncached(
+        sanitizedKey,
+        relativePath,
+        (deliveryPath) => io.File(deliveryPath).writeAsBytes(fileBytes),
+      );
+    }
     final releaseStore = await _cleanup.beginStore(
       sanitizedKey,
       path: relativePath,
@@ -836,18 +861,51 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     final sanitizedKey = _sanitizeBoxKey(key);
-    final box = _cacheBox!;
     final releaseRemoval = await _cleanup.beginStore(sanitizedKey);
     try {
-      final raw = box.get(sanitizedKey);
-      if (raw == null) return;
-      final metadata = CacheEntryMetadata.fromMap(raw);
-      final file = io.File(_cacheFilePath(metadata.relativePath));
-      if (await file.exists()) {
-        await file.delete();
-      }
-      await box.delete(sanitizedKey);
-      _metadataPathRevision++;
+      await _deleteEntry(sanitizedKey);
+    } finally {
+      releaseRemoval();
+      _scheduleCapacityCleanup();
+    }
+  }
+
+  /// Deletes the file and metadata stored for [sanitizedKey]. Callers must
+  /// hold the store lease for the key.
+  Future<void> _deleteEntry(String sanitizedKey) async {
+    final box = _cacheBox!;
+    final raw = box.get(sanitizedKey);
+    if (raw == null) return;
+    final metadata = CacheEntryMetadata.fromMap(raw);
+    final file = io.File(_cacheFilePath(metadata.relativePath));
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await box.delete(sanitizedKey);
+    _metadataPathRevision++;
+  }
+
+  /// Returns a unique path outside the cache directory for a file that is
+  /// delivered to the caller but not cached.
+  String _noCachePath(String fileName) =>
+      '${io.Directory.systemTemp.path}/$fileName'
+      '.${DateTime.now().microsecondsSinceEpoch}.nocache';
+
+  /// Delivers an entry larger than [maxCacheSizeInBytes] without caching it.
+  ///
+  /// [write] creates the file at a [_noCachePath]. Any entry already cached
+  /// for [sanitizedKey] is removed, so the oversized response replaces it.
+  Future<File> _deliverUncached(
+    String sanitizedKey,
+    String fileName,
+    Future<void> Function(String deliveryPath) write,
+  ) async {
+    final releaseRemoval = await _cleanup.beginStore(sanitizedKey);
+    try {
+      final deliveryPath = _noCachePath(fileName);
+      await write(deliveryPath);
+      await _deleteEntry(sanitizedKey);
+      return const LocalFileSystem().file(deliveryPath);
     } finally {
       releaseRemoval();
       _scheduleCapacityCleanup();
@@ -998,6 +1056,11 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     } on Object catch (_) {
       return false;
     }
+  }
+
+  bool _exceedsByteLimit(int length) {
+    final limit = maxCacheSizeInBytes;
+    return limit != null && length > limit;
   }
 
   bool _isOverByteLimit() {

@@ -3,9 +3,12 @@ import 'dart:io' as io;
 import 'package:cached_network_image_ce/cached_network_image.dart'
     show CleanupStrategy, LruCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
+import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart' as http_testing;
 
 void main() {
   group('IO byte limit', () {
@@ -303,9 +306,99 @@ void main() {
       expect(strategy.calls, 0);
     });
   });
+
+  group('IO oversized entries', () {
+    test('oversized download is delivered but not cached', () async {
+      final dir = _temporaryDirectory('oversized_download_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+        httpClientFactory: () => _respondWith(_bytes(20)),
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/oversized';
+
+      final info = await manager
+          .getFileStream(url)
+          .where((response) => response is FileInfo)
+          .cast<FileInfo>()
+          .last;
+      addTearDown(() => _deleteQuietly(info.file.path));
+
+      expect(await info.file.exists(), isTrue);
+      expect(await info.file.length(), 20);
+      expect(info.file.path, isNot(startsWith(dir.path)));
+      expect(await manager.getFileFromCache(url), isNull);
+      expect(await manager.getCacheSize(), 0);
+    });
+
+    test('oversized download removes the previous entry for the key', () async {
+      final dir = _temporaryDirectory('oversized_previous_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+        httpClientFactory: () => _respondWith(_bytes(20)),
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/previous';
+
+      final oldFile =
+          await manager.putFile(url, _bytes(5), maxAge: Duration.zero);
+      final info = await manager
+          .getFileStream(url)
+          .where((response) => response is FileInfo)
+          .cast<FileInfo>()
+          .last;
+      addTearDown(() => _deleteQuietly(info.file.path));
+
+      expect(info.source, FileSource.Online);
+      expect(await manager.getFileFromCache(url), isNull);
+      expect(await oldFile.exists(), isFalse);
+    });
+
+    test('oversized putFile is returned but not cached', () async {
+      final dir = _temporaryDirectory('oversized_put_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/put';
+
+      final file = await manager.putFile(url, _bytes(20));
+      addTearDown(() => _deleteQuietly(file.path));
+
+      expect(await file.exists(), isTrue);
+      expect(await file.length(), 20);
+      expect(await manager.getFileFromCache(url), isNull);
+    });
+
+    test('entry exactly at the limit is cached', () async {
+      final dir = _temporaryDirectory('oversized_exact_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+      const url = 'https://example.com/exact';
+
+      await manager.putFile(url, _bytes(10));
+
+      expect(await manager.getFileFromCache(url), isNotNull);
+    });
+  });
 }
 
 List<int> _bytes(int length) => List.filled(length, 0);
+
+http.Client _respondWith(List<int> bytes) =>
+    http_testing.MockClient((_) async => http.Response.bytes(bytes, 200));
+
+void _deleteQuietly(String filePath) {
+  try {
+    io.File(filePath).deleteSync();
+  } on Object catch (_) {}
+}
 
 Future<void> _waitForEviction() =>
     Future<void>.delayed(const Duration(milliseconds: 20));

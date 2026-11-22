@@ -542,6 +542,77 @@ void main() {
       releaseSecond();
       unrelated();
     });
+
+    test('a full sweep requested during a byte pass runs after it', () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(seconds: 30),
+        servedEntryPruneThreshold: 64,
+      );
+      addTearDown(coordinator.reset);
+      final gate = Completer<void>();
+      final log = <String>[];
+      Future<void> bytePass() async {
+        log.add('byte');
+        await gate.future;
+      }
+
+      Future<void> fullSweep() async => log.add('full');
+      bool isOverCapacity() => false;
+
+      unawaited(
+        coordinator.schedule(
+          bytePass,
+          isOverCapacity,
+          capacity: true,
+          fullSweep: false,
+        ),
+      );
+      var requestDone = false;
+      final request = coordinator
+          .schedule(fullSweep, isOverCapacity)
+          .then((_) => requestDone = true);
+      final tracked = coordinator.cleanupFuture!;
+      await Future<void>.delayed(Duration.zero);
+      expect(log, ['byte']);
+      expect(requestDone, isFalse);
+
+      gate.complete();
+      await tracked;
+      expect(log, ['byte', 'full']);
+      await request;
+      expect(coordinator.cleanupFuture, isNull);
+    });
+
+    test('capacity sweeps requested during a byte pass coalesce after it',
+        () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(seconds: 30),
+        servedEntryPruneThreshold: 64,
+      )..capacityCleanupEnabled = true;
+      addTearDown(coordinator.reset);
+      final gate = Completer<void>();
+      var fullSweeps = 0;
+      Future<void> bytePass() => gate.future;
+      Future<void> fullSweep() async => fullSweeps++;
+      bool isOverCapacity() => false;
+
+      unawaited(
+        coordinator.schedule(
+          bytePass,
+          isOverCapacity,
+          capacity: true,
+          fullSweep: false,
+        ),
+      );
+      final requests = [
+        for (var i = 0; i < 3; i++)
+          coordinator.schedule(fullSweep, isOverCapacity, capacity: true),
+      ];
+      gate.complete();
+      await Future.wait(requests);
+
+      expect(fullSweeps, 1);
+    });
   });
 }
 

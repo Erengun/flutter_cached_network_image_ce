@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:cached_network_image_ce/cached_network_image.dart'
-    show LruCleanupStrategy;
+    show CleanupStrategy, LruCleanupStrategy;
 import 'package:cached_network_image_ce/src/cache/default_cache_manager_web.dart';
 import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
 import 'package:clock/clock.dart';
@@ -1496,6 +1496,73 @@ void main() {
       }
     });
 
+    test('startCleanup during a byte pass still runs the full sweep', () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      var now = t0;
+      final strategy = _HookedLruCleanupStrategy();
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 100,
+        cleanupOnInitialize: false,
+        cleanupStrategy: strategy,
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock(() => now), () async {
+        await manager.putFile('https://example.com/x', bytes(60), key: 'x');
+        now = t0.add(const Duration(minutes: 1));
+        await manager.putFile(
+          'https://example.com/expired',
+          bytes(10),
+          key: 'expired',
+          maxAge: Duration.zero,
+        );
+        now = t0.add(const Duration(minutes: 2));
+        Future<void>? cleanup;
+        // The byte pass started by this store calls startCleanup mid-pass.
+        strategy.onSort = () => cleanup = manager.startCleanup();
+        await manager.putFile('https://example.com/y', bytes(60), key: 'y');
+        await cleanup;
+      });
+
+      expect(await manager.getFileFromCache('expired'), isNull);
+      expect(await manager.getFileFromCache('x'), isNull);
+      expect(await manager.getFileFromCache('y'), isNotNull);
+    });
+
+    test('after startCleanup, byte-only overflow skips the full sweep',
+        () async {
+      final t0 = DateTime.utc(2026, 1, 1);
+      var now = t0;
+      final manager = DefaultCacheManager(
+        hiveInstance: testHive,
+        maxCacheSizeInBytes: 100,
+        cleanupOnInitialize: false,
+        cleanupStrategy: const LruCleanupStrategy(),
+      );
+      addTearDown(manager.dispose);
+
+      await withClock(Clock(() => now), () async {
+        await manager.startCleanup();
+        await manager.putFile('https://example.com/x', bytes(60), key: 'x');
+        now = t0.add(const Duration(minutes: 1));
+        await manager.putFile(
+          'https://example.com/expired',
+          bytes(10),
+          key: 'expired',
+          maxAge: Duration.zero,
+        );
+        now = t0.add(const Duration(minutes: 2));
+        await manager.putFile('https://example.com/y', bytes(60), key: 'y');
+        await waitForEviction();
+      });
+
+      // The expiry pass belongs to the full sweep only.
+      expect(await manager.getFileFromCache('expired'), isNotNull);
+      expect(await manager.getFileFromCache('x'), isNull);
+      expect(await manager.getFileFromCache('y'), isNotNull);
+    });
+
     test('oversized putFile is returned but not cached', () async {
       final manager = DefaultCacheManager(
         hiveInstance: testHive,
@@ -1933,6 +2000,21 @@ void main() {
       await manager.dispose();
     });
   });
+}
+
+/// LRU strategy that runs [onSort] once, on its next call.
+final class _HookedLruCleanupStrategy extends CleanupStrategy {
+  void Function()? onSort;
+
+  @override
+  List<MapEntry<String, CacheEntryMetadata>> sortForEviction(
+    List<MapEntry<String, CacheEntryMetadata>> entries,
+  ) {
+    final hook = onSort;
+    onSort = null;
+    hook?.call();
+    return const LruCleanupStrategy().sortForEviction(entries);
+  }
 }
 
 /// A wrapper around [http.Client] that tracks whether [close] was called.

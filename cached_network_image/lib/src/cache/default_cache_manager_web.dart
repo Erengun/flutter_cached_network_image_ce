@@ -630,27 +630,38 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
   }
 
+  /// Only a store above [maxNrOfCacheObjects] needs the full sweep; byte
+  /// overflow alone is handled by the lighter byte pass.
   void _scheduleCapacityCleanup() {
-    if (_cleanup.capacityCleanupEnabled && _isOverCapacity()) {
+    if (_cleanup.capacityCleanupEnabled && _isOverCount()) {
       unawaited(_scheduleCleanup(capacity: true));
     } else if (_isOverByteLimit()) {
       unawaited(_scheduleByteLimitEviction());
     }
   }
 
+  /// Retries capacity eviction once protected entries become evictable,
+  /// choosing the pass the same way as [_scheduleCapacityCleanup].
+  Future<void> _retryCapacityCleanup() =>
+      _cleanup.capacityCleanupEnabled && _isOverCount()
+          ? _scheduleCleanup(capacity: true)
+          : _scheduleByteLimitEviction();
+
   Future<void> _scheduleByteLimitEviction() {
     return _cleanup.schedule(
       _evictOverByteLimit,
       _isOverByteLimit,
       capacity: true,
+      fullSweep: false,
     );
   }
 
-  bool _isOverCapacity() {
+  bool _isOverCapacity() => _isOverCount() || _isOverByteLimit();
+
+  bool _isOverCount() {
     final box = _metaBox;
     try {
-      return (box != null && box.isOpen && box.length > maxNrOfCacheObjects) ||
-          _isOverByteLimit();
+      return box != null && box.isOpen && box.length > maxNrOfCacheObjects;
     } on Object catch (_) {
       return false;
     }
@@ -695,7 +706,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         isOverCapacity: _isOverByteLimit,
         candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
         evict: _evictEntry,
-        retry: _scheduleByteLimitEviction,
+        retry: _retryCapacityCleanup,
       );
     } on Object catch (e) {
       cacheLogger.log(
@@ -769,10 +780,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         isOverCapacity: _isOverCapacity,
         candidates: () => _cleanupStrategy.sortForEviction(_snapshotEntries()),
         evict: _evictEntry,
-        // Without startCleanup, a retry may only enforce the byte limit.
-        retry: () => _cleanup.capacityCleanupEnabled
-            ? _scheduleCleanup(capacity: true)
-            : _scheduleByteLimitEviction(),
+        retry: _retryCapacityCleanup,
       );
     } on Object catch (e) {
       cacheLogger.log(

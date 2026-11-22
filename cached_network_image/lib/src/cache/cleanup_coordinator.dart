@@ -22,6 +22,8 @@ final class CleanupCoordinator {
   final Map<String, Set<Object>> _activePaths = {};
   final Map<String, Completer<void>> _pathDeletions = {};
   Future<void>? _cleanupFuture;
+  bool _fullSweepInFlight = false;
+  _QueuedSweep? _queuedFullSweep;
   Timer? _capacityRetryTimer;
   DateTime? _capacityRetryAt;
   bool _capacityCleanupPending = false;
@@ -195,14 +197,23 @@ final class CleanupCoordinator {
     if (!isOverCapacity()) cancelCapacityRetry();
   }
 
+  /// Runs [sweep], or joins the sweep already in flight.
+  ///
+  /// A partial pass ([fullSweep] false) cannot stand in for a full sweep, so
+  /// a full sweep requested while one is in flight runs, coalesced, right
+  /// after it, and the returned future completes only once it has run.
   Future<void> schedule(
     Future<void> Function() sweep,
     bool Function() isOverCapacity, {
     bool capacity = false,
+    bool fullSweep = true,
   }) {
     final inFlight = _cleanupFuture;
     if (inFlight != null) {
-      if (capacity && _capacityRetryTimer == null) {
+      if (fullSweep && !_fullSweepInFlight) {
+        final queued = _queuedFullSweep ??= _QueuedSweep(sweep, isOverCapacity);
+        if (!capacity) queued.capacity = false;
+      } else if (capacity && _capacityRetryTimer == null) {
         _capacityCleanupPending = true;
       }
       return inFlight;
@@ -212,16 +223,29 @@ final class CleanupCoordinator {
 
     late final Future<void> cleanup;
     cleanup = () async {
-      do {
-        _capacityCleanupPending = false;
-        await sweep();
-      } while (_capacityCleanupPending &&
-          _capacityRetryTimer == null &&
-          isOverCapacity());
+      var nextSweep = sweep;
+      var nextIsOverCapacity = isOverCapacity;
+      _fullSweepInFlight = fullSweep;
+      while (true) {
+        do {
+          _capacityCleanupPending = false;
+          await nextSweep();
+        } while (_capacityCleanupPending &&
+            _capacityRetryTimer == null &&
+            nextIsOverCapacity());
+        final queued = _queuedFullSweep;
+        if (queued == null) break;
+        _queuedFullSweep = null;
+        if (queued.capacity && _capacityRetryTimer != null) break;
+        nextSweep = queued.sweep;
+        nextIsOverCapacity = queued.isOverCapacity;
+        _fullSweepInFlight = true;
+      }
     }()
         .whenComplete(() {
       if (identical(_cleanupFuture, cleanup)) {
         _cleanupFuture = null;
+        _fullSweepInFlight = false;
       }
     });
     _cleanupFuture = cleanup;
@@ -233,8 +257,21 @@ final class CleanupCoordinator {
     byteLimitEvictionEnabled = false;
     _capacityCleanupPending = false;
     _cleanupFuture = null;
+    _fullSweepInFlight = false;
+    _queuedFullSweep = null;
     cancelCapacityRetry();
     _recentlyServed.clear();
     // Active claims survive manager reuse and release only their own identity.
   }
+}
+
+/// A full sweep waiting for the partial pass in flight to finish.
+final class _QueuedSweep {
+  _QueuedSweep(this.sweep, this.isOverCapacity);
+
+  final Future<void> Function() sweep;
+  final bool Function() isOverCapacity;
+
+  /// Whether only capacity requests asked for this sweep.
+  bool capacity = true;
 }

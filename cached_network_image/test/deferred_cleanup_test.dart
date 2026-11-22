@@ -483,6 +483,41 @@ void main() {
       expect(sweeps, 1);
     });
 
+    test('byte-limit eviction schedules a retry while capacity cleanup is off',
+        () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(milliseconds: 20),
+        servedEntryPruneThreshold: 64,
+      )
+        ..byteLimitEvictionEnabled = true
+        ..capacityCleanupEnabled = false;
+      addTearDown(coordinator.reset);
+      var retried = 0;
+
+      coordinator.markServed('a', clock.now());
+      coordinator.scheduleCapacityRetry(clock.now(), () async => retried++);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(retried, 1);
+    });
+
+    test('reset disables byte-limit eviction', () async {
+      final coordinator = CleanupCoordinator(
+        servedEntryGracePeriod: const Duration(milliseconds: 20),
+        servedEntryPruneThreshold: 64,
+      )..byteLimitEvictionEnabled = true;
+      addTearDown(coordinator.reset);
+      var retried = 0;
+
+      coordinator.reset();
+      expect(coordinator.byteLimitEvictionEnabled, isFalse);
+      coordinator.markServed('a', clock.now());
+      coordinator.scheduleCapacityRetry(clock.now(), () async => retried++);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(retried, 0);
+    });
+
     test('exclusive stores wait for a pending store on the same key', () async {
       final coordinator = CleanupCoordinator(
         servedEntryGracePeriod: const Duration(seconds: 30),

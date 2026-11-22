@@ -27,6 +27,7 @@ final class CleanupCoordinator {
   bool _capacityCleanupPending = false;
 
   bool capacityCleanupEnabled = false;
+  bool byteLimitEvictionEnabled = false;
 
   Future<void>? get cleanupFuture => _cleanupFuture;
 
@@ -132,7 +133,10 @@ final class CleanupCoordinator {
     DateTime now,
     Future<void> Function() retry,
   ) {
-    if (!capacityCleanupEnabled || _recentlyServed.isEmpty) return;
+    if (!(capacityCleanupEnabled || byteLimitEvictionEnabled) ||
+        _recentlyServed.isEmpty) {
+      return;
+    }
     final retryAt = _recentlyServed.values
         .map((servedAt) => servedAt.add(servedEntryGracePeriod))
         .reduce((a, b) => a.isBefore(b) ? a : b);
@@ -226,6 +230,7 @@ final class CleanupCoordinator {
 
   void reset() {
     capacityCleanupEnabled = false;
+    byteLimitEvictionEnabled = false;
     _capacityCleanupPending = false;
     _cleanupFuture = null;
     cancelCapacityRetry();

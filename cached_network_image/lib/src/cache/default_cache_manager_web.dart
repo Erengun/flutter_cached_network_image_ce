@@ -49,7 +49,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// duration instead of removing entries based on expiry.
   /// [maxCacheSizeInBytes] caps the total size of cached entries. When a
   ///   store pushes the cache over it, entries are evicted in
-  ///   [cleanupStrategy] order. Defaults to null (no byte limit).
+  ///   [cleanupStrategy] order. Entries handed to callers in the last 30
+  ///   seconds are protected, so the cache can briefly exceed the limit until
+  ///   they can be evicted. Defaults to null (no byte limit).
   /// [cleanupOnInitialize] can defer cleanup until [startCleanup] is called.
   /// [httpClientFactory] allows injecting a custom HTTP client for testing.
   /// [hiveInstance] allows injecting a pre-initialised Hive instance

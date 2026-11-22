@@ -219,6 +219,30 @@ CachedNetworkImage(
 Note: Using `HttpGet` on Web disables the browser's default image caching
 mechanisms, so images are cached via the `cache_manager` instead.
 
+### Limiting Cache Size
+
+`maxCacheSizeInBytes` caps the cache by total bytes, in addition to
+`maxNrOfCacheObjects`.
+
+```dart
+final cacheManager = DefaultCacheManager(
+  maxCacheSizeInBytes: 100 * 1024 * 1024,
+);
+```
+
+The limit is enforced when an entry is stored and at startup. Entries are
+evicted in `cleanupStrategy` order until the cache fits.
+
+The limit is soft. Entries handed to callers stay protected for 30 seconds,
+so the cache can briefly exceed the limit. A retry runs once that protection
+expires.
+
+An image larger than the limit is shown but not cached. On Web it is delivered
+from memory and not kept after use.
+
+Sizes come from the stored metadata, so `getCacheSize()` on IO, which reads
+the files on disk, can differ slightly.
+
 ### Cache Size
 
 `getCacheSize()` returns the total size in bytes of the images the cache

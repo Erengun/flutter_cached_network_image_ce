@@ -1,5 +1,6 @@
 ## Unreleased
 
+* **Feature:** `DefaultCacheManager` accepts `maxCacheSizeInBytes` to cap the cache by total bytes (#93). Stores that push the cache over the limit evict entries in `cleanupStrategy` order; entries larger than the limit are delivered but not cached. No change when unset.
 * **Feature:** `DefaultCacheManager` now supports access-based retention with `maxIdleDuration`, deferred destructive cleanup with `cleanupOnInitialize: false`, and an idempotent `startCleanup()` gate. Startup cleanup keeps its existing default; runtime capacity sweeps are opt-in through `startCleanup()`. Once enabled, stores above `maxNrOfCacheObjects` schedule a coalesced background sweep, with one retry after temporary handoff protection expires when needed.
 * **Feature:** The web cache manager now records access timestamps and supports the same cleanup strategy, idle-retention, and deferred-cleanup API as native platforms. Legacy web entries without access timestamps are treated as oldest.
 

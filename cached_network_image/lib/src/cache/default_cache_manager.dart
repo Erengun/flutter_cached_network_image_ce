@@ -64,7 +64,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// duration instead of removing files based on [CacheEntryMetadata.validTill].
   /// [maxCacheSizeInBytes] caps the total size of cached files. When a store
   ///   pushes the cache over it, entries are evicted in [cleanupStrategy]
-  ///   order. Defaults to null (no byte limit).
+  ///   order. Entries handed to callers in the last 30 seconds are protected,
+  ///   so the cache can briefly exceed the limit until they can be evicted.
+  ///   Defaults to null (no byte limit).
   /// [cleanupOnInitialize] can defer cleanup until [startCleanup] is called.
   /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   /// [cacheDirectoryProvider] allows overriding where cache files are stored.

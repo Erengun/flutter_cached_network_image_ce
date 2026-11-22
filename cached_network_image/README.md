@@ -230,15 +230,18 @@ final cacheManager = DefaultCacheManager(
 );
 ```
 
-The limit is enforced when an entry is stored and at startup. Entries are
-evicted in `cleanupStrategy` order until the cache fits.
+The limit is enforced when an entry is stored, and during the startup sweep
+(or at `startCleanup()` when cleanup is deferred with
+`cleanupOnInitialize: false`). Entries are evicted in `cleanupStrategy` order
+until the cache fits.
 
 The limit is soft. Entries handed to callers stay protected for 30 seconds,
 so the cache can briefly exceed the limit. A retry runs once that protection
 expires.
 
-An image larger than the limit is shown but not cached. On Web it is delivered
-from memory and not kept after use.
+An image larger than the limit is shown but not cached. On IO it is delivered
+from a temporary file, which later cleanup sweeps or `emptyCache()` delete. On
+Web it is delivered from memory and not kept after use.
 
 Sizes come from the stored metadata, so `getCacheSize()` on IO, which reads
 the files on disk, can differ slightly.

@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:io' as io;
 
 import 'package:cached_network_image_ce/cached_network_image.dart'
@@ -377,7 +378,8 @@ void main() {
   });
 
   group('IO oversized entries', () {
-    test('oversized download is delivered but not cached', () async {
+    _testWithIsolatedTemp('oversized download is delivered but not cached',
+        (_) async {
       final dir = _temporaryDirectory('oversized_download_');
       final manager = DefaultCacheManager(
         cacheDirectoryProvider: () async => dir,
@@ -401,7 +403,8 @@ void main() {
       expect(await manager.getCacheSize(), 0);
     });
 
-    test('oversized download removes the previous entry for the key', () async {
+    _testWithIsolatedTemp(
+        'oversized download removes the previous entry for the key', (_) async {
       final dir = _temporaryDirectory('oversized_previous_');
       final manager = DefaultCacheManager(
         cacheDirectoryProvider: () async => dir,
@@ -425,7 +428,8 @@ void main() {
       expect(await oldFile.exists(), isFalse);
     });
 
-    test('oversized putFile is returned but not cached', () async {
+    _testWithIsolatedTemp('oversized putFile is returned but not cached',
+        (_) async {
       final dir = _temporaryDirectory('oversized_put_');
       final manager = DefaultCacheManager(
         cacheDirectoryProvider: () async => dir,
@@ -440,6 +444,79 @@ void main() {
       expect(await file.exists(), isTrue);
       expect(await file.length(), 20);
       expect(await manager.getFileFromCache(url), isNull);
+    });
+
+    _testWithIsolatedTemp('oversized deliveries go to a dedicated directory',
+        (temp) async {
+      final dir = _temporaryDirectory('oversized_directory_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+
+      final file = await manager.putFile('https://example.com/dir', _bytes(20));
+
+      expect(file.parent.path, _noCacheDirectory(temp).path);
+    });
+
+    _testWithIsolatedTemp(
+        'a full sweep deletes old oversized deliveries and keeps fresh ones',
+        (temp) async {
+      final dir = _temporaryDirectory('oversized_sweep_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+        cleanupOnInitialize: false,
+      );
+      addTearDown(manager.dispose);
+
+      final old = await manager.putFile('https://example.com/old', _bytes(20));
+      final fresh =
+          await manager.putFile('https://example.com/fresh', _bytes(20));
+      io.File(old.path).setLastModifiedSync(
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      await manager.debugRunCleanup();
+
+      expect(await old.exists(), isFalse);
+      expect(await fresh.exists(), isTrue);
+    });
+
+    _testWithIsolatedTemp('emptyCache deletes oversized deliveries',
+        (temp) async {
+      final dir = _temporaryDirectory('oversized_empty_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+
+      final file =
+          await manager.putFile('https://example.com/empty', _bytes(20));
+      await manager.emptyCache();
+
+      expect(await file.exists(), isFalse);
+    });
+
+    _testWithIsolatedTemp('a failed oversized write leaves no delivery file',
+        (temp) async {
+      final dir = _temporaryDirectory('oversized_failed_write_');
+      final manager = DefaultCacheManager(
+        cacheDirectoryProvider: () async => dir,
+        maxCacheSizeInBytes: 10,
+      );
+      addTearDown(manager.dispose);
+
+      await expectLater(
+        manager.putFile('https://example.com/failed', _FailingBytes(20)),
+        throwsStateError,
+      );
+
+      final leftovers = temp
+          .listSync(recursive: true)
+          .where((entity) => entity.path.endsWith('.nocache'));
+      expect(leftovers, isEmpty);
     });
 
     test('entry exactly at the limit is cached', () async {
@@ -487,6 +564,43 @@ final class _CountingLruCleanupStrategy extends CleanupStrategy {
         ),
       );
   }
+}
+
+/// Runs [body] with [io.Directory.systemTemp] pointing at a fresh directory,
+/// so other test files emptying the shared no-cache directory cannot race it.
+void _testWithIsolatedTemp(
+  String description,
+  Future<void> Function(io.Directory temp) body,
+) {
+  test(description, () {
+    final temp = io.Directory.systemTemp.createTempSync('nocache_temp_');
+    addTearDown(() {
+      try {
+        temp.deleteSync(recursive: true);
+      } on Object catch (_) {}
+    });
+    return io.IOOverrides.runZoned(
+      () => body(temp),
+      getSystemTempDirectory: () => temp,
+    );
+  });
+}
+
+io.Directory _noCacheDirectory(io.Directory temp) =>
+    io.Directory('${temp.path}/cached_network_image_ce_nocache');
+
+/// Bytes whose contents throw once a write starts reading them.
+final class _FailingBytes extends ListBase<int> {
+  _FailingBytes(this.length);
+
+  @override
+  int length;
+
+  @override
+  int operator [](int index) => throw StateError('read failed');
+
+  @override
+  void operator []=(int index, int value) => throw UnsupportedError('');
 }
 
 /// LRU strategy that runs [onSort] once, on its next call.

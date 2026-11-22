@@ -32,6 +32,7 @@ const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
 const _kOrphanFileGracePeriod = Duration(minutes: 5);
+const _kNoCacheDirName = 'cached_network_image_ce_nocache';
 const _kServedEntryGracePeriod = Duration(seconds: 30);
 
 /// Size at which recently served entries are swept for expired records.
@@ -674,7 +675,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       } else {
         // Interceptor rejected storage: copy to a temp file for this delivery,
         // then delete the cache-directory copy so nothing is orphaned there.
-        final tempPath = _noCachePath(path.basename(filePath));
+        final tempPath = await _noCachePath(path.basename(filePath));
         await io.File(filePath).copy(tempPath);
         final f = io.File(filePath);
         if (await f.exists()) await f.delete();
@@ -887,11 +888,23 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     _metadataPathRevision++;
   }
 
-  /// Returns a unique path outside the cache directory for a file that is
-  /// delivered to the caller but not cached.
-  String _noCachePath(String fileName) =>
-      '${io.Directory.systemTemp.path}/$fileName'
-      '.${DateTime.now().microsecondsSinceEpoch}.nocache';
+  static int _noCacheSequence = 0;
+
+  /// Directory outside the cache for files delivered but not cached. Full
+  /// sweeps delete its stale files and [emptyCache] clears it.
+  static io.Directory get _noCacheDirectory =>
+      io.Directory(path.join(io.Directory.systemTemp.path, _kNoCacheDirName));
+
+  /// Creates the no-cache directory and returns a unique path in it for a
+  /// file that is delivered to the caller but not cached.
+  Future<String> _noCachePath(String fileName) async {
+    final directory = await _noCacheDirectory.create(recursive: true);
+    return path.join(
+      directory.path,
+      '$fileName.${DateTime.now().microsecondsSinceEpoch}'
+      '.${_noCacheSequence++}.nocache',
+    );
+  }
 
   /// Delivers an entry larger than [maxCacheSizeInBytes] without caching it.
   ///
@@ -904,9 +917,18 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   ) async {
     final releaseRemoval = await _cleanup.beginStore(sanitizedKey);
     try {
-      final deliveryPath = _noCachePath(fileName);
-      await write(deliveryPath);
-      await _deleteEntry(sanitizedKey);
+      final deliveryPath = await _noCachePath(fileName);
+      try {
+        await write(deliveryPath);
+        await _deleteEntry(sanitizedKey);
+      } on Object catch (_) {
+        try {
+          await io.File(deliveryPath).delete();
+        } on Object catch (_) {
+          // The write may not have created the file.
+        }
+        rethrow;
+      }
       return const LocalFileSystem().file(deliveryPath);
     } finally {
       releaseRemoval();
@@ -932,6 +954,38 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     await _cacheBox!.clear();
     _metadataPathRevision++;
+    await _deleteNoCacheFiles();
+  }
+
+  /// Deletes files in the no-cache directory, or only those last modified
+  /// at least [_kOrphanFileGracePeriod] before [olderThan] when given.
+  Future<void> _deleteNoCacheFiles({DateTime? olderThan}) async {
+    try {
+      final directory = _noCacheDirectory;
+      if (!await directory.exists()) return;
+      await for (final entity in directory.list()) {
+        if (entity is! io.File) continue;
+        try {
+          if (olderThan != null) {
+            final stat = await entity.stat();
+            if (olderThan.difference(stat.modified) < _kOrphanFileGracePeriod) {
+              continue;
+            }
+          }
+          await entity.delete();
+        } on Object catch (e) {
+          cacheLogger.log(
+            'CacheManager: Error deleting uncached file ${entity.path}: $e',
+            CacheManagerLogLevel.warning,
+          );
+        }
+      }
+    } on Object catch (e) {
+      cacheLogger.log(
+        'CacheManager: Error listing uncached files: $e',
+        CacheManagerLogLevel.warning,
+      );
+    }
   }
 
   /// Returns the total size in bytes of the images stored in the disk cache.
@@ -1139,6 +1193,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         pathSnapshotRevision,
         now,
       );
+      await _deleteNoCacheFiles(olderThan: now);
 
       // Remove expired entries
       for (final entry in entries) {

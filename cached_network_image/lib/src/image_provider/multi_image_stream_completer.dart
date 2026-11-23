@@ -38,6 +38,10 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
           _nextImageCodec?.dispose();
           _nextImageCodec = event;
         } else {
+          // A codec still buffered here lost its timer when the last listener
+          // left. It is older than this one and must not be switched in later.
+          _nextImageCodec?.dispose();
+          _nextImageCodec = null;
           _handleCodecReady(event);
         }
       },

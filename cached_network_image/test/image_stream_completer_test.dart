@@ -488,6 +488,58 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('A buffered codec does not replace a newer codec',
+      (WidgetTester tester) async {
+    const frameDuration = Duration(milliseconds: 200);
+    final codecStream = StreamController<Codec>();
+    MockCodec animatedCodec() => MockCodec()
+      ..frameCount = 2
+      ..repetitionCount = -1;
+    final firstCodec = animatedCodec();
+    final bufferedCodec = animatedCodec();
+    final newestCodec = animatedCodec();
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+    final streamListener = ImageStreamListener((ImageInfo _, bool __) {});
+    final handle = imageStream.keepAlive();
+
+    imageStream.addListener(streamListener);
+    codecStream.add(firstCodec);
+    await tester.idle();
+    firstCodec.completeNextFrame(FakeFrameInfo(frameDuration, image20x10));
+    await tester.idle();
+    await tester.pump();
+    firstCodec.completeNextFrame(FakeFrameInfo(frameDuration, image200x100));
+    await tester.idle();
+    // The second frame waits on a timer, so the next codec is buffered.
+    await tester.pump(const Duration(milliseconds: 50));
+    codecStream.add(bufferedCodec);
+    await tester.idle();
+
+    // Leaving clears the timer, so the newest codec installs directly.
+    imageStream.removeListener(streamListener);
+    codecStream.add(newestCodec);
+    await tester.idle();
+
+    imageStream.addListener(streamListener);
+    await tester.idle();
+    newestCodec.completeNextFrame(FakeFrameInfo(frameDuration, image50x50));
+    await tester.idle();
+    await tester.pump(frameDuration);
+    newestCodec.completeNextFrame(FakeFrameInfo(frameDuration, image300x100));
+    await tester.idle();
+    await tester.pump(frameDuration);
+
+    // Finishing the newest codec's cycle must not switch back to the older one.
+    expect(bufferedCodec.numFramesAsked, 0);
+    expect(bufferedCodec.disposed, true);
+
+    imageStream.removeListener(streamListener);
+    handle.dispose();
+  });
+
   testWidgets('A new codec is shown after a delayed single-frame replay',
       (WidgetTester tester) async {
     final codecStream = StreamController<Codec>();

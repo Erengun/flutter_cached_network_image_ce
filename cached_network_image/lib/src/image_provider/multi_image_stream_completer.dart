@@ -331,9 +331,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
       // This is not an animated image, just return it and don't schedule more
       // frames.
-      _emitFrame(ImageInfo(image: _nextFrame!.image.clone(), scale: _scale));
-      _nextFrame!.image.dispose();
+      // Take the frame before `_emitFrame`, which notifies listeners
+      // synchronously: a listener that supplies a replacement codec from that
+      // callback would otherwise release the frame still being read here.
+      final singleFrame = _nextFrame!;
       _nextFrame = null;
+      _emitFrame(ImageInfo(image: singleFrame.image.clone(), scale: _scale));
+      singleFrame.image.dispose();
       return;
     }
     _scheduleAppFrame();

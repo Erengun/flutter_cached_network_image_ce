@@ -578,6 +578,40 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('A listener can supply a new codec while a frame is emitted',
+      (WidgetTester tester) async {
+    final codecStream = StreamController<Codec>(sync: true);
+    final firstCodec = MockCodec()
+      ..frameCount = 1
+      ..repetitionCount = 0;
+    final secondCodec = MockCodec()
+      ..frameCount = 1
+      ..repetitionCount = 0;
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+    final handle = imageStream.keepAlive();
+    late final ImageStreamListener streamListener;
+    streamListener = ImageStreamListener((ImageInfo image, bool _) {
+      imageStream.removeListener(streamListener);
+      codecStream.add(secondCodec);
+    });
+    imageStream.addListener(streamListener);
+    codecStream.add(firstCodec);
+    await tester.idle();
+
+    // The replacement arrives during the notification and releases what is
+    // retained, which must not include the frame still being emitted.
+    final frame = FakeFrameInfo(const Duration(milliseconds: 200), image20x10);
+    firstCodec.completeNextFrame(frame);
+    await tester.idle();
+    await tester.pump();
+
+    expect(frame.image.debugDisposed, true);
+    handle.dispose();
+  });
+
   testWidgets('A new codec is shown after a delayed single-frame replay',
       (WidgetTester tester) async {
     final codecStream = StreamController<Codec>();

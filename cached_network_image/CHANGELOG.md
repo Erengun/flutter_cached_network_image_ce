@@ -2,6 +2,7 @@
 
 * **Feature:** `DefaultCacheManager` now supports access-based retention with `maxIdleDuration`, deferred destructive cleanup with `cleanupOnInitialize: false`, and an idempotent `startCleanup()` gate. Startup cleanup keeps its existing default; runtime capacity sweeps are opt-in through `startCleanup()`. Once enabled, stores above `maxNrOfCacheObjects` schedule a coalesced background sweep, with one retry after temporary handoff protection expires when needed.
 * **Feature:** The web cache manager now records access timestamps and supports the same cleanup strategy, idle-retention, and deferred-cleanup API as native platforms. Legacy web entries without access timestamps are treated as oldest.
+* **Fix:** Single-frame images could report `Decoded image has been disposed` when a listener returned after the last one left during a decode, for example after a cached image was refreshed from the network. `MultiImageStreamCompleter` released the retained frame and asked the codec for it again. The retained frame is now handed to the returning listener, and it is released if a replacement codec arrives first (issue #96).
 
 ## [4.14.0] - 2026-10-31
 

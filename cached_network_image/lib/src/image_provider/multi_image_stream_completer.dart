@@ -38,6 +38,10 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
           _nextImageCodec?.dispose();
           _nextImageCodec = event;
         } else {
+          // A codec still buffered here lost its timer when the last listener
+          // left. It is older than this one and must not be switched in later.
+          _nextImageCodec?.dispose();
+          _nextImageCodec = null;
           _handleCodecReady(event);
         }
       },
@@ -146,6 +150,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
     if (hasListeners) {
       _decodeNextFrameAndSchedule();
+    } else {
+      // A frame retained for a departed listener belongs to the outgoing codec
+      // and must not be shown in place of the replacement.
+      _nextFrame?.image.dispose();
+      _nextFrame = null;
     }
   }
 
@@ -174,6 +183,11 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
       nextFrame.image.dispose();
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
         _switchToNewCodec();
+      } else if (_codec!.frameCount == 1) {
+        // A replayed single frame has nothing further to decode, whatever the
+        // codec's repetition count. No later frame will switch to a buffered
+        // codec either, so a timer left set here would hold back replacements.
+        _timer = null;
       } else {
         final completedCycles = _framesEmitted ~/ _codec!.frameCount;
         if (_codec!.repetitionCount == -1 ||
@@ -317,9 +331,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
 
       // This is not an animated image, just return it and don't schedule more
       // frames.
-      _emitFrame(ImageInfo(image: _nextFrame!.image.clone(), scale: _scale));
-      _nextFrame!.image.dispose();
+      // Take the frame before `_emitFrame`, which notifies listeners
+      // synchronously: a listener that supplies a replacement codec from that
+      // callback would otherwise release the frame still being read here.
+      final singleFrame = _nextFrame!;
       _nextFrame = null;
+      _emitFrame(ImageInfo(image: singleFrame.image.clone(), scale: _scale));
+      singleFrame.image.dispose();
       return;
     }
     _scheduleAppFrame();
@@ -350,11 +368,13 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
     // single shared <img> element that is cleared when the previous frame is
     // disposed.
     if (!hasListeners && _codec != null) {
-      if (!animate && _nextFrame != null) {
+      if (_nextFrame != null && (!animate || _codec!.frameCount == 1)) {
         // A frame decoded for the departed listener is still in hand. A
         // paused image shows that one rather than decoding again, which
         // would drop it and advance the codec past the frame the image is
-        // meant to stop on. An animating image keeps re-decoding, as its
+        // meant to stop on. A single-frame codec has no other frame, and
+        // asking it again after releasing this one fails with "Decoded image
+        // has been disposed". An animating image keeps re-decoding, as its
         // held frame is stale by the time a listener returns.
         _scheduleAppFrame();
       } else if (_framesEmitted == 0 || _codec!.frameCount > 1) {

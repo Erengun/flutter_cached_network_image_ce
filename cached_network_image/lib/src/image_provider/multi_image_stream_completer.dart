@@ -183,12 +183,12 @@ class MultiImageStreamCompleter extends ImageStreamCompleter {
       nextFrame.image.dispose();
       if (_framesEmitted % _codec!.frameCount == 0 && _nextImageCodec != null) {
         _switchToNewCodec();
+      } else if (_codec!.frameCount == 1) {
+        // A replayed single frame has nothing further to decode, whatever the
+        // codec's repetition count. No later frame will switch to a buffered
+        // codec either, so a timer left set here would hold back replacements.
+        _timer = null;
       } else {
-        if (_codec!.frameCount == 1) {
-          // No later frame will switch to a buffered codec, so a timer left
-          // set by a delayed replay would hold back every replacement.
-          _timer = null;
-        }
         final completedCycles = _framesEmitted ~/ _codec!.frameCount;
         if (_codec!.repetitionCount == -1 ||
             completedCycles <= _codec!.repetitionCount) {

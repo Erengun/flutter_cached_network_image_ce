@@ -540,6 +540,44 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('A repeating single-frame codec is not decoded after replay',
+      (WidgetTester tester) async {
+    final codecStream = StreamController<Codec>();
+    final mockCodec = MockCodec()
+      ..frameCount = 1
+      ..repetitionCount = 1;
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+
+    final emittedImages = <ImageInfo>[];
+    final streamListener = ImageStreamListener(
+      (ImageInfo image, bool synchronousCall) => emittedImages.add(image),
+    );
+    final handle = imageStream.keepAlive();
+    imageStream.addListener(streamListener);
+    codecStream.add(mockCodec);
+    await tester.idle();
+
+    imageStream.removeListener(streamListener);
+    final frame = FakeFrameInfo(const Duration(milliseconds: 200), image20x10);
+    mockCodec.completeNextFrame(frame);
+    await tester.idle();
+
+    imageStream.addListener(streamListener);
+    await tester.idle();
+    await tester.pump();
+    await tester.idle();
+
+    // The codec has no other frame, whatever its repetition count says.
+    expect(mockCodec.numFramesAsked, 1);
+    expect(emittedImages.single.image.isCloneOf(frame.image), true);
+
+    imageStream.removeListener(streamListener);
+    handle.dispose();
+  });
+
   testWidgets('A new codec is shown after a delayed single-frame replay',
       (WidgetTester tester) async {
     final codecStream = StreamController<Codec>();

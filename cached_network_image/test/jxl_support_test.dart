@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_cache_manager.dart';
@@ -36,9 +36,11 @@ void main() {
       String? receivedUrl;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               unsupportedImageBuilder: (context, url, bytes) {
@@ -65,9 +67,11 @@ void main() {
       Object? receivedError;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CachedNetworkImage(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: MediaQuery(
+            data: const MediaQueryData(),
+            child: CachedNetworkImage(
               imageUrl: imageUrl,
               cacheManager: cacheManager,
               errorWidget: (context, url, error) {

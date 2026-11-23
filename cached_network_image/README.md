@@ -169,6 +169,40 @@ directory:
 <cacheBase>/cached_network_image_ce/hive/
 ```
 
+### Deferred and Access-Based Cleanup
+
+Cleanup can be deferred until application-specific startup work has finished.
+`maxIdleDuration` bases retention on the last write or cache access, while
+`validTill` continues to control network revalidation.
+
+```dart
+final cacheManager = DefaultCacheManager(
+  maxNrOfCacheObjects: 2000,
+  cleanupStrategy: const LruCleanupStrategy(),
+  maxIdleDuration: const Duration(days: 7),
+  cleanupOnInitialize: false,
+);
+
+// After the app's initial cache revalidation has settled:
+await cacheManager.startCleanup();
+```
+
+`cleanupOnInitialize` controls the startup sweep only. Runtime capacity sweeps
+are opt-in: `startCleanup()` enables them for the manager's remaining lifetime
+and waits for one sweep. Concurrent calls share an in-flight sweep. Once
+enabled, stores that exceed `maxNrOfCacheObjects` schedule one coalesced
+background sweep. Entries handed to callers remain protected for 30 seconds;
+if that temporarily prevents enough evictions, stores share a retry scheduled
+for the earliest protection expiry. Capacity eviction follows the configured
+`cleanupStrategy`.
+
+When `maxIdleDuration` is omitted, cleanup retains the existing behavior and
+removes entries whose `validTill` is in the past. With idle retention enabled,
+entries are removed when `now - effectiveTouchedAt >= maxIdleDuration`.
+Native metadata written before access timestamps were introduced falls back to
+`validTill`. Legacy web entries are treated as oldest because earlier web
+versions never recorded access timestamps. No cache migration is required.
+
 **Web Platform Headers Support:** Custom headers (like `Authorization`) are
 only supported with `ImageRenderMethodForWeb.HttpGet`. The default
 `HtmlImage` render method does not support custom headers. If you need to

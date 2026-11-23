@@ -4,8 +4,8 @@ publish_to: none
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.0.0
-  flutter: '>=3.10.0'
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
 
 dependencies:
   cached_network_image_ce:
@@ -15,6 +15,7 @@ dependencies:
   flutter_blurhash: ^0.8.2
   flutter_cache_manager: ^3.4.1
   flutter_svg: ^2.2.1
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:

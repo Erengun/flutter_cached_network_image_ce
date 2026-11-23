@@ -88,6 +88,37 @@ class FakeEventReportingImageStreamCompleter extends ImageStreamCompleter {
   }
 }
 
+/// Delegates to a real engine codec, recording how many frames were requested
+/// and when the first decode finished.
+class _DecodeObservingCodec implements Codec {
+  _DecodeObservingCodec(this._codec);
+
+  final Codec _codec;
+  final _firstDecode = Completer<void>();
+  int numFramesAsked = 0;
+
+  Future<void> get decoded => _firstDecode.future;
+
+  @override
+  int get frameCount => _codec.frameCount;
+
+  @override
+  int get repetitionCount => _codec.repetitionCount;
+
+  @override
+  Future<FrameInfo> getNextFrame() async {
+    numFramesAsked += 1;
+    try {
+      return await _codec.getNextFrame();
+    } finally {
+      if (!_firstDecode.isCompleted) _firstDecode.complete();
+    }
+  }
+
+  @override
+  void dispose() => _codec.dispose();
+}
+
 void main() {
   late Image image20x10;
   late Image image200x100;
@@ -457,9 +488,76 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('A new codec is shown after a delayed single-frame replay',
+      (WidgetTester tester) async {
+    final codecStream = StreamController<Codec>();
+    MockCodec singleFrameCodec() => MockCodec()
+      ..frameCount = 1
+      ..repetitionCount = 0;
+    final firstCodec = singleFrameCodec();
+    final secondCodec = singleFrameCodec();
+    final thirdCodec = singleFrameCodec();
+    final ImageStreamCompleter imageStream = MultiImageStreamCompleter(
+      codec: codecStream.stream,
+      scale: 1.0,
+    );
+
+    final emittedImages = <ImageInfo>[];
+    final streamListener = ImageStreamListener(
+      (ImageInfo image, bool synchronousCall) => emittedImages.add(image),
+    );
+    final handle = imageStream.keepAlive();
+
+    // The first retained frame is replayed and starts a frame duration.
+    imageStream.addListener(streamListener);
+    codecStream.add(firstCodec);
+    await tester.idle();
+    imageStream.removeListener(streamListener);
+    firstCodec.completeNextFrame(
+      FakeFrameInfo(const Duration(milliseconds: 200), image20x10),
+    );
+    await tester.idle();
+    imageStream.addListener(streamListener);
+    await tester.idle();
+    await tester.pump();
+
+    // The second retained frame has to wait out that duration on a timer.
+    imageStream.removeListener(streamListener);
+    codecStream.add(secondCodec);
+    await tester.idle();
+    imageStream.addListener(streamListener);
+    await tester.idle();
+    imageStream.removeListener(streamListener);
+    final secondFrame =
+        FakeFrameInfo(const Duration(milliseconds: 200), image200x100);
+    secondCodec.completeNextFrame(secondFrame);
+    await tester.idle();
+    imageStream.addListener(streamListener);
+    await tester.idle();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(emittedImages.last.image.isCloneOf(secondFrame.image), true);
+
+    // With the listener still attached, the next codec must not be buffered
+    // behind that spent timer.
+    codecStream.add(thirdCodec);
+    await tester.idle();
+    expect(thirdCodec.numFramesAsked, 1);
+    final thirdFrame =
+        FakeFrameInfo(const Duration(milliseconds: 200), image50x50);
+    thirdCodec.completeNextFrame(thirdFrame);
+    await tester.idle();
+    await tester.pump();
+    expect(emittedImages.last.image.isCloneOf(thirdFrame.image), true);
+
+    imageStream.removeListener(streamListener);
+    handle.dispose();
+  });
+
   testWidgets('Reading a refreshed single-frame image twice does not fail',
       (WidgetTester tester) async {
     final errors = <Object>[];
+    late final _DecodeObservingCodec refreshed;
     await tester.runAsync(() async {
       final bytes = Uint8List.fromList(kTransparentImage);
       final codecStream = StreamController<Codec>();
@@ -490,20 +588,25 @@ void main() {
       await firstRead;
 
       // A refreshed copy arrives while nothing is listening.
-      codecStream.add(await instantiateImageCodec(bytes));
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      refreshed = _DecodeObservingCodec(await instantiateImageCodec(bytes));
+      codecStream.add(refreshed);
+      await Future<void>.delayed(Duration.zero);
 
       // The current image is delivered synchronously, so this listener leaves
       // while the refreshed copy is still decoding.
       await readOnce();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await refreshed.decoded;
+      // Let the completer take the frame that decode returned.
+      await Future<void>.delayed(Duration.zero);
       await readOnce();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       handle.dispose();
       await codecStream.close();
     });
 
+    // Asking again would fail on the real codec with "Decoded image has been
+    // disposed".
+    expect(refreshed.numFramesAsked, 1);
     expect(errors, isEmpty);
   });
 
